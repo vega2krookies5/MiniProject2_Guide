@@ -549,7 +549,11 @@ Main Content Area:
    - 개인화 옵션
 ```
 
-# Thymeleaf 관리자 페이지 개발 가이드
+# Thymeleaf 관리자 페이지 개발 가이드 — 온라인 도서관 시스템
+
+> **관리자 도메인:** 도서(Book) · 대출(Loan) · 회원(Member) 3개 영역
+> **접근 경로:** `/admin/**` — Spring Security Stateful 세션 (JWT 불필요)
+> **화면 구성:** Bootstrap 5 + Thymeleaf Layout Dialect
 
 ## 1. 프로젝트 구조
 
@@ -557,246 +561,406 @@ Main Content Area:
 src/
 ├── main/
 │   ├── java/
-│   │   └── com/example/admin/
-│   │       ├── config/          # 설정 클래스
-│   │       ├── entity/          # JPA 엔티티
-│   │       ├── repository/      # JPA Repository
-│   │       ├── service/         # 비즈니스 로직
-│   │       ├── controller/      # MVC Controller
-│   │       ├── dto/            # Data Transfer Object
-│   │       └── AdminApplication.java
+│   │   └── com/example/library/
+│   │       ├── config/
+│   │       │   ├── SecurityConfig.java        # Dual FilterChain 설정
+│   │       │   └── AdminSecurityConfig.java   # /admin/** 세션 인증
+│   │       ├── entity/
+│   │       │   ├── Book.java
+│   │       │   ├── Loan.java
+│   │       │   ├── Member.java
+│   │       │   └── Category.java
+│   │       ├── repository/
+│   │       │   ├── BookRepository.java
+│   │       │   ├── LoanRepository.java
+│   │       │   └── MemberRepository.java
+│   │       ├── service/
+│   │       │   ├── AdminBookService.java
+│   │       │   ├── AdminLoanService.java
+│   │       │   └── AdminMemberService.java
+│   │       ├── controller/admin/
+│   │       │   ├── AdminDashboardController.java  # /admin
+│   │       │   ├── AdminBookController.java       # /admin/books
+│   │       │   ├── AdminLoanController.java       # /admin/loans
+│   │       │   └── AdminMemberController.java     # /admin/members
+│   │       └── dto/
+│   │           ├── BookListDto.java
+│   │           ├── BookFormDto.java
+│   │           ├── LoanListDto.java
+│   │           └── MemberListDto.java
 │   └── resources/
-│       ├── templates/          # Thymeleaf 템플릿
-│       │   ├── layout/        # 공통 레이아웃
-│       │   ├── admin/         # 관리자 페이지
-│       │   └── fragments/     # 재사용 가능한 조각
+│       ├── templates/
+│       │   ├── layout/
+│       │   │   └── base.html          # 공통 레이아웃 (사이드바: 도서·대출·회원)
+│       │   ├── admin/
+│       │   │   ├── dashboard.html     # 대시보드 (통계 카드 4개)
+│       │   │   ├── book/
+│       │   │   │   ├── list.html      # 도서 목록 + 검색
+│       │   │   │   ├── form.html      # 도서 등록/수정
+│       │   │   │   └── detail.html    # 도서 상세
+│       │   │   ├── loan/
+│       │   │   │   └── list.html      # 대출 현황 (탭: 전체/대출중/연체/반납완료)
+│       │   │   └── member/
+│       │   │       └── list.html      # 회원 목록
+│       │   └── auth/
+│       │       └── login.html         # 관리자 로그인
 │       ├── static/
-│       │   ├── css/
-│       │   ├── js/
-│       │   └── images/
+│       │   ├── css/admin.css
+│       │   └── js/admin.js
 │       └── application.yml
 ```
 
 ## 2. Entity 설계
 
-### 2.1 기본 Entity 예시 (User)
+### 2.1 도서(Book) Entity
 
 ```java
 @Entity
-@Table(name = "users")
+@Table(name = "books")
 @Getter @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class User extends BaseEntity {
-    
+public class Book extends BaseEntity {
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "book_id")
     private Long id;
-    
-    @Column(nullable = false, unique = true, length = 50)
-    private String username;
-    
+
+    @Column(nullable = false, unique = true, length = 13)
+    private String isbn;                   // 13자리 ISBN
+
+    @Column(nullable = false, length = 200)
+    private String title;                  // 제목
+
     @Column(nullable = false, length = 100)
-    private String password;
-    
-    @Column(nullable = false, length = 100)
-    private String email;
-    
-    @Column(length = 20)
-    private String phone;
-    
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
-    private UserRole role;
-    
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
-    private UserStatus status;
-    
-    @Column(name = "last_login_at")
-    private LocalDateTime lastLoginAt;
+    private String author;                 // 저자
+
+    @Column(length = 100)
+    private String publisher;              // 출판사
+
+    @Column(name = "publication_date")
+    private LocalDate publicationDate;     // 출판일
+
+    @Column(name = "total_copies")
+    private Integer totalCopies = 1;       // 총 보유 수량
+
+    @Column(name = "available_copies")
+    private Integer availableCopies = 1;   // 대출 가능 수량
+
+    @Column(columnDefinition = "TEXT")
+    private String description;            // 도서 설명
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "category_id")
+    private Category category;             // 카테고리 (소설/IT/역사/기타)
+
+    @OneToMany(mappedBy = "book", fetch = FetchType.LAZY)
+    private List<Loan> loans = new ArrayList<>();
+
+    // 비즈니스 메서드
+    public boolean isAvailable() {
+        return availableCopies > 0;
+    }
+
+    public void decreaseAvailable() {
+        if (availableCopies <= 0) throw new IllegalStateException("재고가 없습니다");
+        availableCopies--;
+    }
+
+    public void increaseAvailable() {
+        availableCopies++;
+    }
 }
 ```
 
-### 2.2 공통 BaseEntity
+### 2.2 대출(Loan) Entity
+
+```java
+@Entity
+@Table(name = "loans")
+@Getter @Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class Loan extends BaseEntity {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "loan_id")
+    private Long id;
+
+    @Column(name = "loan_number", unique = true, nullable = false, length = 12)
+    private String loanNumber;              // 대출번호 (L202505230001)
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "member_id", nullable = false)
+    private Member member;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "book_id", nullable = false)
+    private Book book;
+
+    @Column(name = "loan_date", nullable = false)
+    private LocalDate loanDate;             // 대출일
+
+    @Column(name = "due_date", nullable = false)
+    private LocalDate dueDate;             // 반납 예정일 (대출일 + 14일)
+
+    @Column(name = "return_date")
+    private LocalDate returnDate;           // 실제 반납일
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private LoanStatus status = LoanStatus.REQUESTED;
+
+    @Column(name = "overdue_fee")
+    private BigDecimal overdueFee = BigDecimal.ZERO;  // 연체료
+
+    // 비즈니스 메서드
+    public boolean isOverdue() {
+        return status == LoanStatus.BORROWED
+            && LocalDate.now().isAfter(dueDate);
+    }
+
+    public long getOverdueDays() {
+        if (!isOverdue()) return 0;
+        return ChronoUnit.DAYS.between(dueDate, LocalDate.now());
+    }
+
+    public BigDecimal calculateOverdueFee() {
+        return BigDecimal.valueOf(getOverdueDays() * 100L);  // 1일당 100원
+    }
+}
+```
+
+### 2.3 공통 BaseEntity
 
 ```java
 @MappedSuperclass
 @EntityListeners(AuditingEntityListener.class)
 @Getter @Setter
 public abstract class BaseEntity {
-    
+
     @CreatedDate
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
-    
+
     @LastModifiedDate
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
-    
-    @Column(name = "created_by", length = 50)
-    private String createdBy;
-    
-    @Column(name = "updated_by", length = 50)
-    private String updatedBy;
 }
 ```
 
 ## 3. Repository 설계
 
 ```java
+// ── 도서 Repository ─────────────────────────────────────────────────────────
 @Repository
-public interface UserRepository extends JpaRepository<User, Long> {
-    
-    // 기본 검색 메서드
-    Optional<User> findByUsername(String username);
-    Optional<User> findByEmail(String email);
-    List<User> findByStatus(UserStatus status);
-    
-    // 페이징 및 정렬
-    Page<User> findByUsernameContaining(String username, Pageable pageable);
-    Page<User> findByRole(UserRole role, Pageable pageable);
-    
-    // 복합 조건 검색
-    @Query("SELECT u FROM User u WHERE " +
-           "(:username IS NULL OR u.username LIKE %:username%) AND " +
-           "(:email IS NULL OR u.email LIKE %:email%) AND " +
-           "(:role IS NULL OR u.role = :role) AND " +
-           "(:status IS NULL OR u.status = :status)")
-    Page<User> findBySearchCriteria(
-        @Param("username") String username,
-        @Param("email") String email,
-        @Param("role") UserRole role,
-        @Param("status") UserStatus status,
+public interface BookRepository extends JpaRepository<Book, Long> {
+
+    // 제목·저자·ISBN 복합 검색 + 카테고리 필터
+    @Query("SELECT b FROM Book b LEFT JOIN b.category c WHERE " +
+           "(:keyword IS NULL OR b.title LIKE %:keyword% OR b.author LIKE %:keyword% OR b.isbn LIKE %:keyword%) AND " +
+           "(:categoryId IS NULL OR c.id = :categoryId)")
+    Page<Book> findBySearchCriteria(
+        @Param("keyword")    String keyword,
+        @Param("categoryId") Long   categoryId,
         Pageable pageable
     );
-    
-    // 통계용 쿼리
-    @Query("SELECT COUNT(u) FROM User u WHERE u.createdAt >= :startDate")
-    long countNewUsersAfter(@Param("startDate") LocalDateTime startDate);
+
+    // 대출 가능 도서만 조회
+    Page<Book> findByAvailableCopiesGreaterThan(int copies, Pageable pageable);
+
+    // 통계: 전체 도서 수
+    long count();
+
+    // 통계: 대출 가능 도서 수
+    long countByAvailableCopiesGreaterThan(int copies);
+}
+
+// ── 대출 Repository ─────────────────────────────────────────────────────────
+@Repository
+public interface LoanRepository extends JpaRepository<Loan, Long> {
+
+    // 상태별 조회 (페이징)
+    Page<Loan> findByStatus(LoanStatus status, Pageable pageable);
+
+    // 연체 도서 조회 (대출중인데 반납예정일 초과)
+    @Query("SELECT l FROM Loan l WHERE l.status = 'BORROWED' AND l.dueDate < CURRENT_DATE")
+    List<Loan> findOverdueLoans();
+
+    // 회원별 대출 이력
+    Page<Loan> findByMemberId(Long memberId, Pageable pageable);
+
+    // 도서별 현재 대출 중 수량
+    long countByBookIdAndStatus(Long bookId, LoanStatus status);
+
+    // 통계: 오늘 신청된 대출
+    @Query("SELECT COUNT(l) FROM Loan l WHERE l.createdAt >= :startOfDay")
+    long countTodayRequested(@Param("startOfDay") LocalDateTime startOfDay);
+
+    // 복합 조건 검색 (관리자 대출 현황 페이지)
+    @Query("SELECT l FROM Loan l JOIN l.member m JOIN l.book b WHERE " +
+           "(:status IS NULL OR l.status = :status) AND " +
+           "(:memberId IS NULL OR m.id = :memberId) AND " +
+           "(:onlyOverdue = false OR (l.status = 'BORROWED' AND l.dueDate < CURRENT_DATE))")
+    Page<Loan> findByAdminCriteria(
+        @Param("status")      LoanStatus status,
+        @Param("memberId")    Long memberId,
+        @Param("onlyOverdue") boolean onlyOverdue,
+        Pageable pageable
+    );
 }
 ```
 
 ## 4. DTO 설계
 
-### 4.1 사용자 관련 DTO
+### 4.1 도서(Book) 관련 DTO
 
 ```java
-// 목록 조회용 DTO
-@Getter @Setter
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
-public class UserListDto {
-    private Long id;
-    private String username;
-    private String email;
-    private String phone;
-    private UserRole role;
-    private UserStatus status;
+// ── 목록 조회용 DTO ──────────────────────────────────────────────────────────
+@Getter @Builder
+@NoArgsConstructor @AllArgsConstructor
+public class BookListDto {
+    private Long   id;
+    private String isbn;
+    private String title;
+    private String author;
+    private String publisher;
+    private String categoryName;
+    private int    totalCopies;
+    private int    availableCopies;
+    private LocalDate publicationDate;
     private LocalDateTime createdAt;
-    private LocalDateTime lastLoginAt;
-    
-    public static UserListDto from(User user) {
-        return UserListDto.builder()
-                .id(user.getId())
-                .username(user.getUsername())
-                .email(user.getEmail())
-                .phone(user.getPhone())
-                .role(user.getRole())
-                .status(user.getStatus())
-                .createdAt(user.getCreatedAt())
-                .lastLoginAt(user.getLastLoginAt())
-                .build();
+
+    public static BookListDto from(Book b) {
+        return BookListDto.builder()
+            .id(b.getId())
+            .isbn(b.getIsbn())
+            .title(b.getTitle())
+            .author(b.getAuthor())
+            .publisher(b.getPublisher())
+            .categoryName(b.getCategory() != null ? b.getCategory().getCategoryName() : "-")
+            .totalCopies(b.getTotalCopies())
+            .availableCopies(b.getAvailableCopies())
+            .publicationDate(b.getPublicationDate())
+            .createdAt(b.getCreatedAt())
+            .build();
     }
 }
 
-// 상세 조회용 DTO
+// ── 등록/수정 폼 DTO ─────────────────────────────────────────────────────────
 @Getter @Setter
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
-public class UserDetailDto {
-    private Long id;
-    private String username;
-    private String email;
-    private String phone;
-    private UserRole role;
-    private UserStatus status;
-    private LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
-    private LocalDateTime lastLoginAt;
-    
-    public static UserDetailDto from(User user) {
-        return UserDetailDto.builder()
-                .id(user.getId())
-                .username(user.getUsername())
-                .email(user.getEmail())
-                .phone(user.getPhone())
-                .role(user.getRole())
-                .status(user.getStatus())
-                .createdAt(user.getCreatedAt())
-                .updatedAt(user.getUpdatedAt())
-                .lastLoginAt(user.getLastLoginAt())
-                .build();
+@NoArgsConstructor @AllArgsConstructor
+public class BookFormDto {
+
+    @NotBlank(message = "ISBN은 필수입니다")
+    @Pattern(regexp = "^\\d{13}$", message = "ISBN은 13자리 숫자입니다")
+    private String isbn;
+
+    @NotBlank(message = "제목은 필수입니다")
+    @Size(max = 200, message = "제목은 200자 이내")
+    private String title;
+
+    @NotBlank(message = "저자는 필수입니다")
+    private String author;
+
+    private String publisher;
+
+    @DateTimeFormat(pattern = "yyyy-MM-dd")
+    private LocalDate publicationDate;
+
+    @NotNull(message = "총 수량은 필수입니다")
+    @Min(value = 1, message = "최소 1권 이상")
+    private Integer totalCopies;
+
+    private Long categoryId;
+
+    @Size(max = 1000)
+    private String description;
+
+    public Book toEntity(Category category) {
+        return Book.builder()
+            .isbn(isbn).title(title).author(author)
+            .publisher(publisher).publicationDate(publicationDate)
+            .totalCopies(totalCopies).availableCopies(totalCopies)
+            .category(category).description(description)
+            .build();
     }
 }
 
-// 생성/수정용 DTO
+// ── 검색용 DTO ───────────────────────────────────────────────────────────────
 @Getter @Setter
-@NoArgsConstructor
-@AllArgsConstructor
-public class UserFormDto {
-    
-    @NotBlank(message = "사용자명은 필수입니다")
-    @Size(min = 3, max = 50, message = "사용자명은 3-50자 사이여야 합니다")
-    private String username;
-    
-    @NotBlank(message = "비밀번호는 필수입니다")
-    @Size(min = 8, message = "비밀번호는 최소 8자 이상이어야 합니다")
-    private String password;
-    
-    @NotBlank(message = "이메일은 필수입니다")
-    @Email(message = "올바른 이메일 형식이 아닙니다")
-    private String email;
-    
-    @Pattern(regexp = "^[0-9]{2,3}-[0-9]{3,4}-[0-9]{4}$", 
-             message = "올바른 전화번호 형식이 아닙니다")
-    private String phone;
-    
-    @NotNull(message = "역할은 필수입니다")
-    private UserRole role;
-    
-    @NotNull(message = "상태는 필수입니다")
-    private UserStatus status;
-    
-    public User toEntity() {
-        return User.builder()
-                .username(this.username)
-                .password(this.password) // 실제로는 암호화 필요
-                .email(this.email)
-                .phone(this.phone)
-                .role(this.role)
-                .status(this.status)
-                .build();
-    }
-}
-
-// 검색용 DTO
-@Getter @Setter
-@NoArgsConstructor
-@AllArgsConstructor
-public class UserSearchDto {
-    private String username;
-    private String email;
-    private UserRole role;
-    private UserStatus status;
-    private String sortBy = "createdAt";
+@NoArgsConstructor @AllArgsConstructor
+public class BookSearchDto {
+    private String keyword;       // 제목·저자·ISBN 통합 검색
+    private Long   categoryId;
+    private String sortBy  = "createdAt";
     private String sortDir = "desc";
-    private int page = 0;
-    private int size = 10;
-    
+    private int    page    = 0;
+    private int    size    = 10;
+
+    public Pageable getPageable() {
+        Sort sort = Sort.by(Sort.Direction.fromString(sortDir), sortBy);
+        return PageRequest.of(page, size, sort);
+    }
+}
+```
+
+### 4.2 대출(Loan) 관련 DTO
+
+```java
+// ── 대출 목록용 DTO ──────────────────────────────────────────────────────────
+@Getter @Builder
+@NoArgsConstructor @AllArgsConstructor
+public class LoanListDto {
+    private Long       id;
+    private String     loanNumber;
+    private String     memberName;
+    private String     memberNumber;
+    private String     bookTitle;
+    private String     bookIsbn;
+    private LocalDate  loanDate;
+    private LocalDate  dueDate;
+    private LocalDate  returnDate;
+    private LoanStatus status;
+    private boolean    overdue;
+    private long       overdueDays;
+    private BigDecimal overdueFee;
+
+    public static LoanListDto from(Loan l) {
+        return LoanListDto.builder()
+            .id(l.getId())
+            .loanNumber(l.getLoanNumber())
+            .memberName(l.getMember().getName())
+            .memberNumber(l.getMember().getMemberNumber())
+            .bookTitle(l.getBook().getTitle())
+            .bookIsbn(l.getBook().getIsbn())
+            .loanDate(l.getLoanDate())
+            .dueDate(l.getDueDate())
+            .returnDate(l.getReturnDate())
+            .status(l.getStatus())
+            .overdue(l.isOverdue())
+            .overdueDays(l.getOverdueDays())
+            .overdueFee(l.calculateOverdueFee())
+            .build();
+    }
+}
+
+// ── 대출 검색용 DTO ──────────────────────────────────────────────────────────
+@Getter @Setter
+@NoArgsConstructor @AllArgsConstructor
+public class LoanSearchDto {
+    private LoanStatus status;         // 상태 필터 (null이면 전체)
+    private Long       memberId;
+    private boolean    onlyOverdue = false;
+    private String     sortBy      = "loanDate";
+    private String     sortDir     = "desc";
+    private int        page        = 0;
+    private int        size        = 10;
+
     public Pageable getPageable() {
         Sort sort = Sort.by(Sort.Direction.fromString(sortDir), sortBy);
         return PageRequest.of(page, size, sort);
@@ -807,89 +971,136 @@ public class UserSearchDto {
 ## 5. Service 설계
 
 ```java
+// ── AdminBookService ─────────────────────────────────────────────────────────
 @Service
 @Transactional(readOnly = true)
 @RequiredArgsConstructor
-public class UserService {
-    
-    private final UserRepository userRepository;
-    private final PasswordEncoder passwordEncoder;
-    
-    // 목록 조회 (페이징, 검색)
-    public Page<UserListDto> getUsers(UserSearchDto searchDto) {
-        Pageable pageable = searchDto.getPageable();
-        Page<User> users = userRepository.findBySearchCriteria(
-            searchDto.getUsername(),
-            searchDto.getEmail(),
-            searchDto.getRole(),
-            searchDto.getStatus(),
-            pageable
-        );
-        
-        return users.map(UserListDto::from);
+public class AdminBookService {
+
+    private final BookRepository     bookRepository;
+    private final CategoryRepository categoryRepository;
+
+    // 도서 목록 (검색 + 페이징)
+    public Page<BookListDto> getBooks(BookSearchDto searchDto) {
+        return bookRepository
+            .findBySearchCriteria(searchDto.getKeyword(), searchDto.getCategoryId(),
+                                  searchDto.getPageable())
+            .map(BookListDto::from);
     }
-    
-    // 상세 조회
-    public UserDetailDto getUser(Long id) {
-        User user = userRepository.findById(id)
-                .orElseThrow(() -> new EntityNotFoundException("사용자를 찾을 수 없습니다"));
-        return UserDetailDto.from(user);
+
+    // 도서 상세
+    public Book getBook(Long id) {
+        return bookRepository.findById(id)
+            .orElseThrow(() -> new EntityNotFoundException("도서를 찾을 수 없습니다"));
     }
-    
-    // 생성
+
+    // 도서 등록
     @Transactional
-    public Long createUser(UserFormDto userFormDto) {
-        // 중복 체크
-        if (userRepository.findByUsername(userFormDto.getUsername()).isPresent()) {
-            throw new DuplicateKeyException("이미 존재하는 사용자명입니다");
-        }
-        
-        if (userRepository.findByEmail(userFormDto.getEmail()).isPresent()) {
-            throw new DuplicateKeyException("이미 존재하는 이메일입니다");
-        }
-        
-        // 비밀번호 암호화
-        User user = userFormDto.toEntity();
-        user.setPassword(passwordEncoder.encode(user.getPassword()));
-        
-        User savedUser = userRepository.save(user);
-        return savedUser.getId();
+    public Long createBook(BookFormDto form) {
+        if (bookRepository.findByIsbn(form.getIsbn()).isPresent())
+            throw new IllegalArgumentException("이미 등록된 ISBN입니다: " + form.getIsbn());
+
+        Category category = null;
+        if (form.getCategoryId() != null)
+            category = categoryRepository.findById(form.getCategoryId()).orElse(null);
+
+        Book book = form.toEntity(category);
+        return bookRepository.save(book).getId();
     }
-    
-    // 수정
+
+    // 도서 수정
     @Transactional
-    public void updateUser(Long id, UserFormDto userFormDto) {
-        User user = userRepository.findById(id)
-                .orElseThrow(() -> new EntityNotFoundException("사용자를 찾을 수 없습니다"));
-        
-        // 수정할 필드만 업데이트
-        user.setEmail(userFormDto.getEmail());
-        user.setPhone(userFormDto.getPhone());
-        user.setRole(userFormDto.getRole());
-        user.setStatus(userFormDto.getStatus());
-        
-        // 비밀번호가 변경된 경우에만 암호화하여 업데이트
-        if (StringUtils.hasText(userFormDto.getPassword())) {
-            user.setPassword(passwordEncoder.encode(userFormDto.getPassword()));
-        }
+    public void updateBook(Long id, BookFormDto form) {
+        Book book = getBook(id);
+        int stockDiff = form.getTotalCopies() - book.getTotalCopies();
+
+        book.setTitle(form.getTitle());
+        book.setAuthor(form.getAuthor());
+        book.setPublisher(form.getPublisher());
+        book.setPublicationDate(form.getPublicationDate());
+        book.setTotalCopies(form.getTotalCopies());
+        book.setAvailableCopies(book.getAvailableCopies() + stockDiff); // 대출 수 유지
+        book.setDescription(form.getDescription());
+
+        if (form.getCategoryId() != null)
+            book.setCategory(categoryRepository.findById(form.getCategoryId()).orElse(null));
     }
-    
-    // 삭제 (실제로는 상태 변경)
+
+    // 도서 삭제 (현재 대출 중이면 불가)
     @Transactional
-    public void deleteUser(Long id) {
-        User user = userRepository.findById(id)
-                .orElseThrow(() -> new EntityNotFoundException("사용자를 찾을 수 없습니다"));
-        user.setStatus(UserStatus.DELETED);
+    public void deleteBook(Long id) {
+        Book book = getBook(id);
+        if (book.getAvailableCopies() < book.getTotalCopies())
+            throw new IllegalStateException("대출 중인 도서가 있어 삭제할 수 없습니다");
+        bookRepository.delete(book);
     }
-    
-    // 통계 정보
-    public Map<String, Object> getUserStatistics() {
-        Map<String, Object> stats = new HashMap<>();
-        stats.put("totalUsers", userRepository.count());
-        stats.put("activeUsers", userRepository.findByStatus(UserStatus.ACTIVE).size());
-        stats.put("newUsersThisMonth", userRepository.countNewUsersAfter(
-            LocalDateTime.now().withDayOfMonth(1).withHour(0).withMinute(0).withSecond(0)
-        ));
+
+    // 대시보드용 통계
+    public Map<String, Long> getStats() {
+        Map<String, Long> stats = new HashMap<>();
+        stats.put("totalBooks",     bookRepository.count());
+        stats.put("availableBooks", bookRepository.countByAvailableCopiesGreaterThan(0));
+        return stats;
+    }
+}
+
+// ── AdminLoanService ─────────────────────────────────────────────────────────
+@Service
+@Transactional(readOnly = true)
+@RequiredArgsConstructor
+public class AdminLoanService {
+
+    private final LoanRepository loanRepository;
+
+    // 대출 목록 (상태 필터 + 페이징)
+    public Page<LoanListDto> getLoans(LoanSearchDto searchDto) {
+        return loanRepository
+            .findByAdminCriteria(searchDto.getStatus(), searchDto.getMemberId(),
+                                 searchDto.isOnlyOverdue(), searchDto.getPageable())
+            .map(LoanListDto::from);
+    }
+
+    // 연체 목록
+    public List<LoanListDto> getOverdueLoans() {
+        return loanRepository.findOverdueLoans().stream()
+            .map(LoanListDto::from).toList();
+    }
+
+    // 대출 승인 (REQUESTED → BORROWED)
+    @Transactional
+    public void approveLoan(Long loanId) {
+        Loan loan = loanRepository.findById(loanId)
+            .orElseThrow(() -> new EntityNotFoundException("대출 정보를 찾을 수 없습니다"));
+
+        if (loan.getStatus() != LoanStatus.REQUESTED)
+            throw new IllegalStateException("승인 대기 상태가 아닙니다");
+
+        loan.setStatus(LoanStatus.BORROWED);
+        loan.getBook().decreaseAvailable();
+    }
+
+    // 반납 처리 (BORROWED/OVERDUE → RETURNED)
+    @Transactional
+    public void returnLoan(Long loanId) {
+        Loan loan = loanRepository.findById(loanId)
+            .orElseThrow(() -> new EntityNotFoundException("대출 정보를 찾을 수 없습니다"));
+
+        if (loan.getStatus() != LoanStatus.BORROWED && loan.getStatus() != LoanStatus.OVERDUE)
+            throw new IllegalStateException("반납할 수 없는 상태입니다");
+
+        loan.setStatus(LoanStatus.RETURNED);
+        loan.setReturnDate(LocalDate.now());
+        loan.setOverdueFee(loan.calculateOverdueFee());
+        loan.getBook().increaseAvailable();
+    }
+
+    // 대시보드용 통계
+    public Map<String, Long> getStats() {
+        Map<String, Long> stats = new HashMap<>();
+        stats.put("totalBorrowed",  loanRepository.countByStatus(LoanStatus.BORROWED));
+        stats.put("overdueLoans",   (long) loanRepository.findOverdueLoans().size());
+        stats.put("todayRequested", loanRepository.countTodayRequested(
+            LocalDate.now().atStartOfDay()));
         return stats;
     }
 }
@@ -898,820 +1109,545 @@ public class UserService {
 ## 6. Controller 설계
 
 ```java
+// ── AdminBookController ──────────────────────────────────────────────────────
 @Controller
-@RequestMapping("/admin/users")
+@RequestMapping("/admin/books")
 @RequiredArgsConstructor
-public class UserController {
-    
-    private final UserService userService;
-    
-    // 사용자 목록 페이지
+public class AdminBookController {
+
+    private final AdminBookService   bookService;
+    private final CategoryRepository categoryRepository;
+
+    // 도서 목록 페이지
     @GetMapping
-    public String userList(
-            @ModelAttribute UserSearchDto searchDto,
-            Model model) {
-        
-        Page<UserListDto> users = userService.getUsers(searchDto);
-        
-        model.addAttribute("users", users);
-        model.addAttribute("searchDto", searchDto);
-        model.addAttribute("roles", UserRole.values());
-        model.addAttribute("statuses", UserStatus.values());
-        
-        return "admin/users/list";
+    public String list(@ModelAttribute BookSearchDto searchDto, Model model) {
+        model.addAttribute("books",      bookService.getBooks(searchDto));
+        model.addAttribute("searchDto",  searchDto);
+        model.addAttribute("categories", categoryRepository.findAll());
+        return "admin/book/list";
     }
-    
-    // 사용자 상세 페이지
+
+    // 도서 상세 페이지
     @GetMapping("/{id}")
-    public String userDetail(@PathVariable Long id, Model model) {
-        UserDetailDto user = userService.getUser(id);
-        model.addAttribute("user", user);
-        return "admin/users/detail";
+    public String detail(@PathVariable Long id, Model model) {
+        model.addAttribute("book", bookService.getBook(id));
+        return "admin/book/detail";
     }
-    
-    // 사용자 생성 폼 페이지
+
+    // 도서 등록 폼
     @GetMapping("/new")
-    public String userCreateForm(Model model) {
-        model.addAttribute("userForm", new UserFormDto());
-        model.addAttribute("roles", UserRole.values());
-        model.addAttribute("statuses", UserStatus.values());
-        return "admin/users/form";
+    public String createForm(Model model) {
+        model.addAttribute("bookForm",   new BookFormDto());
+        model.addAttribute("categories", categoryRepository.findAll());
+        return "admin/book/form";
     }
-    
-    // 사용자 생성 처리
+
+    // 도서 등록 처리
     @PostMapping("/new")
-    public String userCreate(
-            @Valid @ModelAttribute("userForm") UserFormDto userForm,
-            BindingResult bindingResult,
-            Model model,
-            RedirectAttributes redirectAttributes) {
-        
-        if (bindingResult.hasErrors()) {
-            model.addAttribute("roles", UserRole.values());
-            model.addAttribute("statuses", UserStatus.values());
-            return "admin/users/form";
+    public String create(@Valid @ModelAttribute("bookForm") BookFormDto form,
+                         BindingResult errors,
+                         Model model,
+                         RedirectAttributes ra) {
+        if (errors.hasErrors()) {
+            model.addAttribute("categories", categoryRepository.findAll());
+            return "admin/book/form";
         }
-        
         try {
-            Long userId = userService.createUser(userForm);
-            redirectAttributes.addFlashAttribute("message", "사용자가 성공적으로 생성되었습니다.");
-            return "redirect:/admin/users/" + userId;
-        } catch (DuplicateKeyException e) {
-            bindingResult.reject("duplicate", e.getMessage());
-            model.addAttribute("roles", UserRole.values());
-            model.addAttribute("statuses", UserStatus.values());
-            return "admin/users/form";
+            Long id = bookService.createBook(form);
+            ra.addFlashAttribute("message", "도서가 등록되었습니다.");
+            return "redirect:/admin/books/" + id;
+        } catch (IllegalArgumentException e) {
+            errors.reject("duplicate", e.getMessage());
+            model.addAttribute("categories", categoryRepository.findAll());
+            return "admin/book/form";
         }
     }
-    
-    // 사용자 수정 폼 페이지
+
+    // 도서 수정 폼
     @GetMapping("/{id}/edit")
-    public String userEditForm(@PathVariable Long id, Model model) {
-        UserDetailDto user = userService.getUser(id);
-        
-        UserFormDto userForm = new UserFormDto();
-        userForm.setUsername(user.getUsername());
-        userForm.setEmail(user.getEmail());
-        userForm.setPhone(user.getPhone());
-        userForm.setRole(user.getRole());
-        userForm.setStatus(user.getStatus());
-        
-        model.addAttribute("userForm", userForm);
-        model.addAttribute("userId", id);
-        model.addAttribute("roles", UserRole.values());
-        model.addAttribute("statuses", UserStatus.values());
-        
-        return "admin/users/form";
+    public String editForm(@PathVariable Long id, Model model) {
+        Book book = bookService.getBook(id);
+        BookFormDto form = new BookFormDto();
+        form.setIsbn(book.getIsbn());
+        form.setTitle(book.getTitle());
+        form.setAuthor(book.getAuthor());
+        form.setPublisher(book.getPublisher());
+        form.setPublicationDate(book.getPublicationDate());
+        form.setTotalCopies(book.getTotalCopies());
+        form.setDescription(book.getDescription());
+        if (book.getCategory() != null) form.setCategoryId(book.getCategory().getId());
+
+        model.addAttribute("bookForm",   form);
+        model.addAttribute("bookId",     id);
+        model.addAttribute("categories", categoryRepository.findAll());
+        return "admin/book/form";
     }
-    
-    // 사용자 수정 처리
+
+    // 도서 수정 처리
     @PostMapping("/{id}/edit")
-    public String userUpdate(
-            @PathVariable Long id,
-            @Valid @ModelAttribute("userForm") UserFormDto userForm,
-            BindingResult bindingResult,
-            Model model,
-            RedirectAttributes redirectAttributes) {
-        
-        if (bindingResult.hasErrors()) {
-            model.addAttribute("userId", id);
-            model.addAttribute("roles", UserRole.values());
-            model.addAttribute("statuses", UserStatus.values());
-            return "admin/users/form";
+    public String update(@PathVariable Long id,
+                         @Valid @ModelAttribute("bookForm") BookFormDto form,
+                         BindingResult errors,
+                         Model model,
+                         RedirectAttributes ra) {
+        if (errors.hasErrors()) {
+            model.addAttribute("bookId",     id);
+            model.addAttribute("categories", categoryRepository.findAll());
+            return "admin/book/form";
         }
-        
-        try {
-            userService.updateUser(id, userForm);
-            redirectAttributes.addFlashAttribute("message", "사용자 정보가 성공적으로 수정되었습니다.");
-            return "redirect:/admin/users/" + id;
-        } catch (Exception e) {
-            bindingResult.reject("error", "수정 중 오류가 발생했습니다: " + e.getMessage());
-            model.addAttribute("userId", id);
-            model.addAttribute("roles", UserRole.values());
-            model.addAttribute("statuses", UserStatus.values());
-            return "admin/users/form";
-        }
+        bookService.updateBook(id, form);
+        ra.addFlashAttribute("message", "도서 정보가 수정되었습니다.");
+        return "redirect:/admin/books/" + id;
     }
-    
-    // 사용자 삭제
+
+    // 도서 삭제 (AJAX)
     @DeleteMapping("/{id}")
     @ResponseBody
-    public ResponseEntity<?> userDelete(@PathVariable Long id) {
+    public ResponseEntity<?> delete(@PathVariable Long id) {
         try {
-            userService.deleteUser(id);
-            return ResponseEntity.ok().body(Map.of("message", "사용자가 삭제되었습니다."));
-        } catch (Exception e) {
+            bookService.deleteBook(id);
+            return ResponseEntity.ok(Map.of("message", "도서가 삭제되었습니다."));
+        } catch (IllegalStateException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
     }
-    
-    // AJAX 검색
-    @GetMapping("/search")
+}
+
+// ── AdminLoanController ──────────────────────────────────────────────────────
+@Controller
+@RequestMapping("/admin/loans")
+@RequiredArgsConstructor
+public class AdminLoanController {
+
+    private final AdminLoanService loanService;
+
+    // 대출 현황 페이지
+    @GetMapping
+    public String list(@ModelAttribute LoanSearchDto searchDto, Model model) {
+        model.addAttribute("loans",     loanService.getLoans(searchDto));
+        model.addAttribute("searchDto", searchDto);
+        model.addAttribute("statuses",  LoanStatus.values());
+        model.addAttribute("overdueCount", loanService.getOverdueLoans().size());
+        return "admin/loan/list";
+    }
+
+    // 대출 승인 (AJAX)
+    @PostMapping("/{id}/approve")
     @ResponseBody
-    public Page<UserListDto> searchUsers(@ModelAttribute UserSearchDto searchDto) {
-        return userService.getUsers(searchDto);
+    public ResponseEntity<?> approve(@PathVariable Long id) {
+        try {
+            loanService.approveLoan(id);
+            return ResponseEntity.ok(Map.of("message", "대출이 승인되었습니다."));
+        } catch (IllegalStateException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    // 반납 처리 (AJAX)
+    @PostMapping("/{id}/return")
+    @ResponseBody
+    public ResponseEntity<?> returnBook(@PathVariable Long id) {
+        try {
+            loanService.returnLoan(id);
+            return ResponseEntity.ok(Map.of("message", "반납이 처리되었습니다."));
+        } catch (IllegalStateException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
     }
 }
 ```
 
 ## 7. Thymeleaf 템플릿 설계
 
-### 7.1 공통 레이아웃 (layout/admin.html)
+### 7.1 공통 레이아웃 (layout/base.html)
 
 ```html
 <!DOCTYPE html>
-<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<html lang="ko"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      xmlns:sec="http://www.thymeleaf.org/extras/spring-security">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title th:text="${title} + ' - 관리자'">관리자</title>
-    
-    <!-- Bootstrap CSS -->
+    <title th:text="${title != null ? title + ' — 도서관 관리자' : '도서관 관리자'}">도서관 관리자</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <!-- Font Awesome -->
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <!-- Custom CSS -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <link th:href="@{/css/admin.css}" rel="stylesheet">
-    
-    <!-- 페이지별 추가 CSS -->
     <th:block layout:fragment="css"></th:block>
 </head>
-<body>
-    <!-- 네비게이션 바 -->
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
-        <div class="container-fluid">
-            <a class="navbar-brand" th:href="@{/admin}">
-                <i class="fas fa-cogs"></i> 관리자
+<body class="bg-light">
+
+<!-- ── 상단 네비게이션 바 ─────────────────────────────────────────────────── -->
+<nav class="navbar navbar-expand-lg navbar-dark" style="background-color:#1e3a5f;">
+    <div class="container-fluid">
+        <a class="navbar-brand fw-bold" th:href="@{/admin}">
+            <i class="fas fa-book-open me-2"></i>도서관 관리자
+        </a>
+        <div class="navbar-nav ms-auto">
+            <span class="navbar-text text-white-50 me-3" sec:authentication="name">관리자</span>
+            <a class="btn btn-sm btn-outline-light" th:href="@{/admin/logout}">
+                <i class="fas fa-sign-out-alt"></i> 로그아웃
             </a>
-            
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            
-            <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav me-auto">
+        </div>
+    </div>
+</nav>
+
+<div class="container-fluid">
+    <div class="row">
+
+        <!-- ── 사이드바 ────────────────────────────────────────────────────── -->
+        <nav class="col-md-2 d-md-block bg-white sidebar shadow-sm" style="min-height:calc(100vh - 56px);">
+            <div class="position-sticky pt-3">
+                <ul class="nav flex-column">
                     <li class="nav-item">
-                        <a class="nav-link" th:href="@{/admin}" th:classappend="${#request.requestURI == '/admin'} ? 'active'">
-                            <i class="fas fa-home"></i> 대시보드
+                        <a class="nav-link"
+                           th:href="@{/admin}"
+                           th:classappend="${#request.requestURI == '/admin'} ? 'active fw-bold text-primary' : 'text-secondary'">
+                            <i class="fas fa-tachometer-alt me-2"></i>대시보드
                         </a>
                     </li>
+
+                    <li class="nav-item mt-2">
+                        <small class="text-uppercase text-muted px-3 fw-bold" style="font-size:.7rem;">도서 관리</small>
+                    </li>
                     <li class="nav-item">
-                        <a class="nav-link" th:href="@{/admin/users}" th:classappend="${#strings.startsWith(#request.requestURI, '/admin/users')} ? 'active'">
-                            <i class="fas fa-users"></i> 사용자 관리
+                        <a class="nav-link"
+                           th:href="@{/admin/books}"
+                           th:classappend="${#strings.startsWith(#request.requestURI,'/admin/books')} ? 'active fw-bold text-primary' : 'text-secondary'">
+                            <i class="fas fa-book me-2"></i>도서 목록
                         </a>
                     </li>
-                </ul>
-                
-                <ul class="navbar-nav">
-                    <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
-                            <i class="fas fa-user"></i> 관리자
+
+                    <li class="nav-item mt-2">
+                        <small class="text-uppercase text-muted px-3 fw-bold" style="font-size:.7rem;">대출 관리</small>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link"
+                           th:href="@{/admin/loans}"
+                           th:classappend="${#strings.startsWith(#request.requestURI,'/admin/loans')} ? 'active fw-bold text-primary' : 'text-secondary'">
+                            <i class="fas fa-hand-holding-heart me-2"></i>대출 현황
+                            <!-- 연체 건수 배지 -->
+                            <span th:if="${overdueCount != null and overdueCount > 0}"
+                                  class="badge bg-danger ms-1" th:text="${overdueCount}"></span>
                         </a>
-                        <ul class="dropdown-menu">
-                            <li><a class="dropdown-item" th:href="@{/admin/profile}">프로필</a></li>
-                            <li><hr class="dropdown-divider"></li>
-                            <li><a class="dropdown-item" th:href="@{/logout}">로그아웃</a></li>
-                        </ul>
+                    </li>
+
+                    <li class="nav-item mt-2">
+                        <small class="text-uppercase text-muted px-3 fw-bold" style="font-size:.7rem;">회원 관리</small>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link"
+                           th:href="@{/admin/members}"
+                           th:classappend="${#strings.startsWith(#request.requestURI,'/admin/members')} ? 'active fw-bold text-primary' : 'text-secondary'">
+                            <i class="fas fa-users me-2"></i>회원 목록
+                        </a>
                     </li>
                 </ul>
             </div>
-        </div>
-    </nav>
-    
-    <!-- 메인 컨텐츠 -->
-    <div class="container-fluid mt-4">
-        <!-- 브레드크럼 -->
-        <nav aria-label="breadcrumb" th:if="${breadcrumbs}">
-            <ol class="breadcrumb">
-                <li class="breadcrumb-item" th:each="crumb : ${breadcrumbs}" 
-                    th:classappend="${crumbStat.last} ? 'active'">
-                    <a th:if="${!crumbStat.last}" th:href="${crumb.url}" th:text="${crumb.name}"></a>
-                    <span th:if="${crumbStat.last}" th:text="${crumb.name}"></span>
-                </li>
-            </ol>
         </nav>
-        
-        <!-- 알림 메시지 -->
-        <div th:if="${message}" class="alert alert-success alert-dismissible fade show" role="alert">
-            <i class="fas fa-check-circle"></i> <span th:text="${message}"></span>
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-        </div>
-        
-        <div th:if="${error}" class="alert alert-danger alert-dismissible fade show" role="alert">
-            <i class="fas fa-exclamation-circle"></i> <span th:text="${error}"></span>
-            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-        </div>
-        
-        <!-- 페이지 컨텐츠 -->
-        <div layout:fragment="content"></div>
+
+        <!-- ── 메인 콘텐츠 영역 ──────────────────────────────────────────── -->
+        <main class="col-md-10 ms-sm-auto px-4 py-4">
+
+            <!-- 플래시 메시지 -->
+            <div th:if="${message}" class="alert alert-success alert-dismissible fade show" role="alert">
+                <i class="fas fa-check-circle me-1"></i><span th:text="${message}"></span>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+            <div th:if="${error}" class="alert alert-danger alert-dismissible fade show" role="alert">
+                <i class="fas fa-exclamation-circle me-1"></i><span th:text="${error}"></span>
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+
+            <!-- 페이지별 콘텐츠 삽입 지점 -->
+            <div layout:fragment="content"></div>
+
+        </main>
     </div>
-    
-    <!-- Bootstrap JS -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <!-- jQuery -->
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <!-- Custom JS -->
-    <script th:src="@{/js/admin.js}"></script>
-    
-    <!-- 페이지별 추가 JS -->
-    <th:block layout:fragment="script"></th:block>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script th:src="@{/js/admin.js}"></script>
+<th:block layout:fragment="script"></th:block>
 </body>
 </html>
 ```
 
-### 7.2 사용자 목록 페이지 (admin/users/list.html)
+### 7.2 도서 목록 페이지 (admin/book/list.html)
 
 ```html
 <!DOCTYPE html>
-<html lang="ko" 
+<html lang="ko"
       xmlns:th="http://www.thymeleaf.org"
       xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
-      layout:decorate="~{layout/admin}">
+      layout:decorate="~{layout/base}">
 
 <th:block layout:fragment="css">
-    <style>
-        .search-form { background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
-        .table-actions { white-space: nowrap; }
-        .badge-role { font-size: 0.8em; }
-        .pagination-wrapper { display: flex; justify-content: center; margin-top: 20px; }
-    </style>
+<style>
+    .search-panel { background:#f8f9fa; border-radius:.5rem; padding:1.25rem; margin-bottom:1.5rem; }
+    .stock-badge  { font-size:.8em; }
+    .table-actions { white-space:nowrap; }
+</style>
 </th:block>
 
 <div layout:fragment="content">
+
+    <!-- 페이지 헤더 -->
     <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2><i class="fas fa-users"></i> 사용자 관리</h2>
-        <a th:href="@{/admin/users/new}" class="btn btn-primary">
-            <i class="fas fa-plus"></i> 새 사용자 추가
+        <h4 class="mb-0"><i class="fas fa-book me-2"></i>도서 목록</h4>
+        <a th:href="@{/admin/books/new}" class="btn btn-primary btn-sm">
+            <i class="fas fa-plus me-1"></i>도서 등록
         </a>
     </div>
-    
+
     <!-- 검색 폼 -->
-    <form th:action="@{/admin/users}" method="get" th:object="${searchDto}" class="search-form">
-        <div class="row g-3">
-            <div class="col-md-3">
-                <label class="form-label">사용자명</label>
-                <input type="text" class="form-control" th:field="*{username}" placeholder="사용자명 검색">
+    <form th:action="@{/admin/books}" method="get" th:object="${searchDto}" class="search-panel">
+        <div class="row g-3 align-items-end">
+            <div class="col-md-4">
+                <label class="form-label form-label-sm">검색 (제목·저자·ISBN)</label>
+                <input type="text" class="form-control form-control-sm"
+                       th:field="*{keyword}" placeholder="검색어를 입력하세요">
             </div>
-            
             <div class="col-md-3">
-                <label class="form-label">이메일</label>
-                <input type="email" class="form-control" th:field="*{email}" placeholder="이메일 검색">
-            </div>
-            
-            <div class="col-md-2">
-                <label class="form-label">역할</label>
-                <select class="form-select" th:field="*{role}">
+                <label class="form-label form-label-sm">카테고리</label>
+                <select class="form-select form-select-sm" th:field="*{categoryId}">
                     <option value="">전체</option>
-                    <option th:each="role : ${roles}" th:value="${role}" th:text="${role.displayName}"></option>
+                    <option th:each="cat : ${categories}"
+                            th:value="${cat.id}"
+                            th:text="${cat.categoryName}"></option>
                 </select>
             </div>
-            
-            <div class="col-md-2">
-                <label class="form-label">상태</label>
-                <select class="form-select" th:field="*{status}">
-                    <option value="">전체</option>
-                    <option th:each="status : ${statuses}" th:value="${status}" th:text="${status.displayName}"></option>
-                </select>
-            </div>
-            
-            <div class="col-md-2 d-flex align-items-end">
-                <button type="submit" class="btn btn-outline-primary me-2">
+            <div class="col-md-auto">
+                <button type="submit" class="btn btn-outline-primary btn-sm">
                     <i class="fas fa-search"></i> 검색
                 </button>
-                <a th:href="@{/admin/users}" class="btn btn-outline-secondary">
+                <a th:href="@{/admin/books}" class="btn btn-outline-secondary btn-sm ms-1">
                     <i class="fas fa-redo"></i> 초기화
                 </a>
             </div>
         </div>
-        
-        <!-- 숨겨진 정렬 필드 -->
         <input type="hidden" th:field="*{sortBy}">
         <input type="hidden" th:field="*{sortDir}">
         <input type="hidden" th:field="*{page}">
         <input type="hidden" th:field="*{size}">
     </form>
-    
-    <!-- 결과 통계 -->
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <span class="text-muted">
-            총 <strong th:text="${users.totalElements}">0</strong>명의 사용자 
-            (<strong th:text="${users.number + 1}">1</strong> / <strong th:text="${users.totalPages}">1</strong> 페이지)
-        </span>
-        
-        <div>
-            <label class="form-label me-2">페이지 크기:</label>
-            <select class="form-select form-select-sm d-inline-block" style="width: auto;" 
-                    onchange="changePageSize(this.value)">
-                <option th:each="size : ${T(java.util.Arrays).asList(10, 20, 50, 100)}" 
-                        th:value="${size}" 
-                        th:text="${size}"
-                        th:selected="${size == searchDto.size}"></option>
-            </select>
-        </div>
-    </div>
-    
-    <!-- 사용자 목록 테이블 -->
-    <div class="card">
+
+    <!-- 결과 카운트 -->
+    <p class="text-muted small mb-2">
+        총 <strong th:text="${books.totalElements}">0</strong>권
+        (<strong th:text="${books.number + 1}">1</strong> / <strong th:text="${books.totalPages}">1</strong> 페이지)
+    </p>
+
+    <!-- 도서 목록 테이블 -->
+    <div class="card shadow-sm">
         <div class="table-responsive">
-            <table class="table table-hover mb-0">
+            <table class="table table-hover align-middle mb-0">
                 <thead class="table-dark">
                     <tr>
-                        <th>
-                            <a th:href="@{/admin/users(${searchDto.getUrlParams()}, sortBy='username', sortDir=${searchDto.sortBy == 'username' and searchDto.sortDir == 'asc' ? 'desc' : 'asc'})}"
-                               class="text-white text-decoration-none">
-                                사용자명
-                                <i th:if="${searchDto.sortBy == 'username'}" 
-                                   th:class="${searchDto.sortDir == 'asc' ? 'fas fa-sort-up' : 'fas fa-sort-down'}"></i>
-                                <i th:unless="${searchDto.sortBy == 'username'}" class="fas fa-sort"></i>
-                            </a>
-                        </th>
-                        <th>
-                            <a th:href="@{/admin/users(${searchDto.getUrlParams()}, sortBy='email', sortDir=${searchDto.sortBy == 'email' and searchDto.sortDir == 'asc' ? 'desc' : 'asc'})}"
-                               class="text-white text-decoration-none">
-                                이메일
-                                <i th:if="${searchDto.sortBy == 'email'}" 
-                                   th:class="${searchDto.sortDir == 'asc' ? 'fas fa-sort-up' : 'fas fa-sort-down'}"></i>
-                                <i th:unless="${searchDto.sortBy == 'email'}" class="fas fa-sort"></i>
-                            </a>
-                        </th>
-                        <th>전화번호</th>
-                        <th>역할</th>
-                        <th>상태</th>
-                        <th>
-                            <a th:href="@{/admin/users(${searchDto.getUrlParams()}, sortBy='createdAt', sortDir=${searchDto.sortBy == 'createdAt' and searchDto.sortDir == 'asc' ? 'desc' : 'asc'})}"
-                               class="text-white text-decoration-none">
-                                가입일
-                                <i th:if="${searchDto.sortBy == 'createdAt'}" 
-                                   th:class="${searchDto.sortDir == 'asc' ? 'fas fa-sort-up' : 'fas fa-sort-down'}"></i>
-                                <i th:unless="${searchDto.sortBy == 'createdAt'}" class="fas fa-sort"></i>
-                            </a>
-                        </th>
-                        <th>마지막 로그인</th>
-                        <th>액션</th>
+                        <th>ISBN</th>
+                        <th>제목</th>
+                        <th>저자</th>
+                        <th>카테고리</th>
+                        <th class="text-center">총 수량</th>
+                        <th class="text-center">대출 가능</th>
+                        <th>등록일</th>
+                        <th>관리</th>
                     </tr>
                 </thead>
                 <tbody>
-                    <tr th:each="user : ${users.content}">
+                    <tr th:each="book : ${books.content}">
+                        <td class="text-monospace small" th:text="${book.isbn}"></td>
                         <td>
-                            <a th:href="@{/admin/users/{id}(id=${user.id})}" 
-                               class="text-decoration-none fw-bold">
-                                <span th:text="${user.username}"></span>
-                            </a>
+                            <a th:href="@{/admin/books/{id}(id=${book.id})}"
+                               class="fw-bold text-decoration-none" th:text="${book.title}"></a>
                         </td>
-                        <td th:text="${user.email}"></td>
-                        <td th:text="${user.phone ?: '-'}"></td>
+                        <td th:text="${book.author}"></td>
                         <td>
-                            <span class="badge badge-role" 
-                                  th:classappend="${user.role.name() == 'ADMIN' ? 'bg-danger' : 'bg-info'}"
-                                  th:text="${user.role.displayName}"></span>
+                            <span class="badge bg-secondary" th:text="${book.categoryName}"></span>
                         </td>
-                        <td>
-                            <span class="badge" 
-                                  th:classappend="${user.status.name() == 'ACTIVE' ? 'bg-success' : 'bg-secondary'}"
-                                  th:text="${user.status.displayName}"></span>
+                        <td class="text-center" th:text="${book.totalCopies}"></td>
+                        <td class="text-center">
+                            <!-- 재고에 따라 배지 색상 변경 -->
+                            <span class="badge stock-badge"
+                                  th:classappend="${book.availableCopies > 0 ? 'bg-success' : 'bg-danger'}"
+                                  th:text="${book.availableCopies > 0 ? book.availableCopies + '권' : '없음'}"></span>
                         </td>
-                        <td th:text="${#temporals.format(user.createdAt, 'yyyy-MM-dd')}"></td>
-                        <td th:text="${user.lastLoginAt != null ? #temporals.format(user.lastLoginAt, 'yyyy-MM-dd HH:mm') : '-'}"></td>
+                        <td th:text="${#temporals.format(book.createdAt, 'yyyy-MM-dd')}"></td>
                         <td class="table-actions">
                             <div class="btn-group btn-group-sm">
-                                <a th:href="@{/admin/users/{id}(id=${user.id})}" 
-                                   class="btn btn-outline-info" title="상세보기">
-                                    <i class="fas fa-eye"></i>
-                                </a>
-                                <a th:href="@{/admin/users/{id}/edit(id=${user.id})}" 
+                                <a th:href="@{/admin/books/{id}/edit(id=${book.id})}"
                                    class="btn btn-outline-warning" title="수정">
                                     <i class="fas fa-edit"></i>
                                 </a>
-                                <button type="button" class="btn btn-outline-danger" 
-                                        title="삭제" onclick="deleteUser([[${user.id}]], '[[${user.username}]]')">
+                                <button type="button" class="btn btn-outline-danger" title="삭제"
+                                        th:onclick="|deleteBook(${book.id}, '${book.title}')|">
                                     <i class="fas fa-trash"></i>
                                 </button>
                             </div>
                         </td>
                     </tr>
-                    
-                    <tr th:if="${users.content.empty}">
-                        <td colspan="8" class="text-center text-muted py-4">
-                            <i class="fas fa-search fa-2x mb-2"></i>
-                            <div>검색 결과가 없습니다.</div>
+                    <tr th:if="${books.content.empty}">
+                        <td colspan="8" class="text-center text-muted py-5">
+                            <i class="fas fa-search fa-2x mb-2 d-block"></i>검색 결과가 없습니다.
                         </td>
                     </tr>
                 </tbody>
             </table>
         </div>
     </div>
-    
+
     <!-- 페이지네이션 -->
-    <div class="pagination-wrapper" th:if="${users.totalPages > 1}">
-        <nav>
-            <ul class="pagination">
-                <!-- 이전 페이지 -->
-                <li class="page-item" th:classappend="${!users.hasPrevious()} ? 'disabled'">
-                    <a class="page-link" 
-                       th:href="${users.hasPrevious()} ? @{/admin/users(${searchDto.getUrlParams()}, page=${users.number - 1})} : '#'">
-                        <i class="fas fa-chevron-left"></i>
-                    </a>
-                </li>
-                
-                <!-- 페이지 번호 -->
-                <li class="page-item" 
-                    th:each="pageNum : ${#numbers.sequence(T(java.lang.Math).max(0, users.number - 2), T(java.lang.Math).min(users.totalPages - 1, users.number + 2))}"
-                    th:classappend="${pageNum == users.number} ? 'active'">
-                    <a class="page-link" 
-                       th:href="@{/admin/users(${searchDto.getUrlParams()}, page=${pageNum})}"
-                       th:text="${pageNum + 1}"></a>
-                </li>
-                
-                <!-- 다음 페이지 -->
-                <li class="page-item" th:classappend="${!users.hasNext()} ? 'disabled'">
-                    <a class="page-link" 
-                       th:href="${users.hasNext()} ? @{/admin/users(${searchDto.getUrlParams()}, page=${users.number + 1})} : '#'">
-                        <i class="fas fa-chevron-right"></i>
-                    </a>
-                </li>
-            </ul>
-        </nav>
-    </div>
+    <nav class="mt-3 d-flex justify-content-center" th:if="${books.totalPages > 1}">
+        <ul class="pagination pagination-sm">
+            <li class="page-item" th:classappend="${!books.hasPrevious()} ? 'disabled'">
+                <a class="page-link"
+                   th:href="${books.hasPrevious()} ? @{/admin/books(keyword=${searchDto.keyword}, categoryId=${searchDto.categoryId}, page=${books.number - 1})} : '#'">
+                    <i class="fas fa-chevron-left"></i>
+                </a>
+            </li>
+            <li class="page-item"
+                th:each="p : ${#numbers.sequence(T(java.lang.Math).max(0, books.number - 2), T(java.lang.Math).min(books.totalPages - 1, books.number + 2))}"
+                th:classappend="${p == books.number} ? 'active'">
+                <a class="page-link"
+                   th:href="@{/admin/books(keyword=${searchDto.keyword}, categoryId=${searchDto.categoryId}, page=${p})}"
+                   th:text="${p + 1}"></a>
+            </li>
+            <li class="page-item" th:classappend="${!books.hasNext()} ? 'disabled'">
+                <a class="page-link"
+                   th:href="${books.hasNext()} ? @{/admin/books(keyword=${searchDto.keyword}, categoryId=${searchDto.categoryId}, page=${books.number + 1})} : '#'">
+                    <i class="fas fa-chevron-right"></i>
+                </a>
+            </li>
+        </ul>
+    </nav>
 </div>
 
 <th:block layout:fragment="script">
-    <script>
-        // 페이지 크기 변경
-        function changePageSize(size) {
-            const url = new URL(window.location);
-            url.searchParams.set('size', size);
-            url.searchParams.set('page', '0'); // 첫 페이지로 이동
-            window.location.href = url.toString();
-        }
-        
-        // 사용자 삭제
-        function deleteUser(userId, username) {
-            if (confirm(`정말로 '${username}' 사용자를 삭제하시겠습니까?`)) {
-                fetch(`/admin/users/${userId}`, {
-                    method: 'DELETE',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-Requested-With': 'XMLHttpRequest'
-                    }
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.message) {
-                        alert(data.message);
-                        location.reload();
-                    } else if (data.error) {
-                        alert('오류: ' + data.error);
-                    }
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    alert('삭제 중 오류가 발생했습니다.');
-                });
-            }
-        }
-    </script>
+<script>
+function deleteBook(bookId, title) {
+    if (!confirm(`"${title}" 도서를 삭제하시겠습니까?\n현재 대출 중인 도서는 삭제할 수 없습니다.`)) return;
+    fetch(`/admin/books/${bookId}`, {
+        method: 'DELETE',
+        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.message) { alert(data.message); location.reload(); }
+        else               { alert('오류: ' + data.error); }
+    });
+}
+</script>
 </th:block>
 ```
 
-### 7.3 사용자 상세 페이지 (admin/users/detail.html)
+### 7.3 도서 등록/수정 폼 (admin/book/form.html)
 
 ```html
 <!DOCTYPE html>
-<html lang="ko" 
+<html lang="ko"
       xmlns:th="http://www.thymeleaf.org"
       xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
-      layout:decorate="~{layout/admin}">
-
-<th:block layout:fragment="css">
-    <style>
-        .info-card { border: none; box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075); }
-        .info-label { font-weight: 600; color: #6c757d; margin-bottom: 0.25rem; }
-        .info-value { font-size: 1.1rem; margin-bottom: 1rem; }
-        .status-badge { font-size: 1rem; padding: 0.5rem 1rem; }
-    </style>
-</th:block>
-
-<div layout:fragment="content">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <div>
-            <h2><i class="fas fa-user"></i> 사용자 상세 정보</h2>
-            <nav aria-label="breadcrumb">
-                <ol class="breadcrumb">
-                    <li class="breadcrumb-item"><a th:href="@{/admin/users}">사용자 관리</a></li>
-                    <li class="breadcrumb-item active" th:text="${user.username}"></li>
-                </ol>
-            </nav>
-        </div>
-        
-        <div class="btn-group">
-            <a th:href="@{/admin/users/{id}/edit(id=${user.id})}" class="btn btn-warning">
-                <i class="fas fa-edit"></i> 수정
-            </a>
-            <button type="button" class="btn btn-danger" 
-                    onclick="deleteUser([[${user.id}]], '[[${user.username}]]')">
-                <i class="fas fa-trash"></i> 삭제
-            </button>
-            <a th:href="@{/admin/users}" class="btn btn-secondary">
-                <i class="fas fa-list"></i> 목록으로
-            </a>
-        </div>
-    </div>
-    
-    <div class="row">
-        <!-- 기본 정보 -->
-        <div class="col-md-8">
-            <div class="card info-card mb-4">
-                <div class="card-header">
-                    <h5 class="card-title mb-0"><i class="fas fa-info-circle"></i> 기본 정보</h5>
-                </div>
-                <div class="card-body">
-                    <div class="row">
-                        <div class="col-md-6">
-                            <div class="info-label">사용자명</div>
-                            <div class="info-value" th:text="${user.username}"></div>
-                            
-                            <div class="info-label">이메일</div>
-                            <div class="info-value">
-                                <a th:href="'mailto:' + ${user.email}" th:text="${user.email}"></a>
-                            </div>
-                            
-                            <div class="info-label">전화번호</div>
-                            <div class="info-value" th:text="${user.phone ?: '-'}"></div>
-                        </div>
-                        
-                        <div class="col-md-6">
-                            <div class="info-label">역할</div>
-                            <div class="info-value">
-                                <span class="badge status-badge" 
-                                      th:classappend="${user.role.name() == 'ADMIN' ? 'bg-danger' : 'bg-info'}"
-                                      th:text="${user.role.displayName}"></span>
-                            </div>
-                            
-                            <div class="info-label">상태</div>
-                            <div class="info-value">
-                                <span class="badge status-badge" 
-                                      th:classappend="${user.status.name() == 'ACTIVE' ? 'bg-success' : 'bg-secondary'}"
-                                      th:text="${user.status.displayName}"></span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <!-- 활동 정보 -->
-        <div class="col-md-4">
-            <div class="card info-card mb-4">
-                <div class="card-header">
-                    <h5 class="card-title mb-0"><i class="fas fa-clock"></i> 활동 정보</h5>
-                </div>
-                <div class="card-body">
-                    <div class="info-label">가입일</div>
-                    <div class="info-value" th:text="${#temporals.format(user.createdAt, 'yyyy년 MM월 dd일 HH:mm')}"></div>
-                    
-                    <div class="info-label">최종 수정일</div>
-                    <div class="info-value" th:text="${user.updatedAt != null ? #temporals.format(user.updatedAt, 'yyyy년 MM월 dd일 HH:mm') : '-'}"></div>
-                    
-                    <div class="info-label">마지막 로그인</div>
-                    <div class="info-value" th:text="${user.lastLoginAt != null ? #temporals.format(user.lastLoginAt, 'yyyy년 MM월 dd일 HH:mm') : '로그인 기록 없음'}"></div>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <!-- 추가 정보나 관련 데이터가 있다면 여기에 추가 -->
-    <div class="row">
-        <div class="col-12">
-            <div class="card info-card">
-                <div class="card-header">
-                    <h5 class="card-title mb-0"><i class="fas fa-history"></i> 활동 로그</h5>
-                </div>
-                <div class="card-body">
-                    <div class="text-muted text-center py-4">
-                        <i class="fas fa-info-circle fa-2x mb-2"></i>
-                        <div>활동 로그 기능은 추후 구현 예정입니다.</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<th:block layout:fragment="script">
-    <script>
-        // 사용자 삭제
-        function deleteUser(userId, username) {
-            if (confirm(`정말로 '${username}' 사용자를 삭제하시겠습니까?`)) {
-                fetch(`/admin/users/${userId}`, {
-                    method: 'DELETE',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-Requested-With': 'XMLHttpRequest'
-                    }
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.message) {
-                        alert(data.message);
-                        window.location.href = '/admin/users';
-                    } else if (data.error) {
-                        alert('오류: ' + data.error);
-                    }
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    alert('삭제 중 오류가 발생했습니다.');
-                });
-            }
-        }
-    </script>
-</th:block>
-```
-
-### 7.4 사용자 생성/수정 폼 (admin/users/form.html)
-
-```html
-<!DOCTYPE html>
-<html lang="ko" 
-      xmlns:th="http://www.thymeleaf.org"
-      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
-      layout:decorate="~{layout/admin}">
-
-<th:block layout:fragment="css">
-    <style>
-        .form-card { border: none; box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075); }
-        .required { color: #dc3545; }
-        .form-help { font-size: 0.875rem; color: #6c757d; }
-        .password-toggle { cursor: pointer; }
-    </style>
-</th:block>
+      layout:decorate="~{layout/base}">
 
 <div layout:fragment="content">
     <div class="row justify-content-center">
         <div class="col-lg-8">
+
             <div class="d-flex justify-content-between align-items-center mb-4">
-                <div>
-                    <h2 th:if="${userId == null}"><i class="fas fa-plus"></i> 새 사용자 추가</h2>
-                    <h2 th:if="${userId != null}"><i class="fas fa-edit"></i> 사용자 수정</h2>
-                    <nav aria-label="breadcrumb">
-                        <ol class="breadcrumb">
-                            <li class="breadcrumb-item"><a th:href="@{/admin/users}">사용자 관리</a></li>
-                            <li class="breadcrumb-item active" th:text="${userId == null ? '새 사용자 추가' : '사용자 수정'}"></li>
-                        </ol>
-                    </nav>
-                </div>
-                
-                <a th:href="${userId != null ? '/admin/users/' + userId : '/admin/users'}" 
-                   class="btn btn-secondary">
-                    <i class="fas fa-arrow-left"></i> 돌아가기
+                <h4 th:text="${bookId == null ? '도서 등록' : '도서 수정'}"></h4>
+                <a th:href="@{/admin/books}" class="btn btn-secondary btn-sm">
+                    <i class="fas fa-arrow-left me-1"></i>목록으로
                 </a>
             </div>
-            
-            <div class="card form-card">
+
+            <div class="card shadow-sm">
                 <div class="card-body">
-                    <form th:action="${userId == null ? '/admin/users/new' : '/admin/users/' + userId + '/edit'}" 
-                          method="post" 
-                          th:object="${userForm}"
+                    <form th:action="${bookId == null ? '/admin/books/new' : '/admin/books/' + bookId + '/edit'}"
+                          method="post"
+                          th:object="${bookForm}"
                           novalidate>
-                        
-                        <!-- 전체 오류 메시지 -->
+
+                        <!-- 전역 오류 -->
                         <div th:if="${#fields.hasGlobalErrors()}" class="alert alert-danger">
-                            <ul class="mb-0">
-                                <li th:each="error : ${#fields.globalErrors()}" th:text="${error}"></li>
-                            </ul>
+                            <li th:each="e : ${#fields.globalErrors()}" th:text="${e}"></li>
                         </div>
-                        
-                        <div class="row">
-                            <!-- 사용자명 -->
-                            <div class="col-md-6 mb-3">
-                                <label for="username" class="form-label">
-                                    사용자명 <span class="required">*</span>
-                                </label>
-                                <input type="text" 
-                                       class="form-control" 
-                                       th:field="*{username}"
-                                       th:classappend="${#fields.hasErrors('username')} ? 'is-invalid'"
-                                       th:readonly="${userId != null}"
-                                       placeholder="사용자명을 입력하세요">
-                                <div class="form-help" th:if="${userId == null}">3-50자 사이로 입력해주세요.</div>
-                                <div class="invalid-feedback" th:if="${#fields.hasErrors('username')}" th:errors="*{username}"></div>
+
+                        <div class="row g-3">
+                            <!-- ISBN (등록시에만 편집) -->
+                            <div class="col-md-6">
+                                <label class="form-label">ISBN <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control"
+                                       th:field="*{isbn}"
+                                       th:classappend="${#fields.hasErrors('isbn')} ? 'is-invalid'"
+                                       th:readonly="${bookId != null}"
+                                       placeholder="13자리 숫자 (예: 9788932917245)">
+                                <div class="invalid-feedback" th:errors="*{isbn}"></div>
                             </div>
-                            
-                            <!-- 이메일 -->
-                            <div class="col-md-6 mb-3">
-                                <label for="email" class="form-label">
-                                    이메일 <span class="required">*</span>
-                                </label>
-                                <input type="email" 
-                                       class="form-control" 
-                                       th:field="*{email}"
-                                       th:classappend="${#fields.hasErrors('email')} ? 'is-invalid'"
-                                       placeholder="이메일을 입력하세요">
-                                <div class="invalid-feedback" th:if="${#fields.hasErrors('email')}" th:errors="*{email}"></div>
-                            </div>
-                        </div>
-                        
-                        <div class="row">
-                            <!-- 비밀번호 -->
-                            <div class="col-md-6 mb-3">
-                                <label for="password" class="form-label">
-                                    비밀번호 
-                                    <span class="required" th:if="${userId == null}">*</span>
-                                    <span th:if="${userId != null}" class="form-help">(변경시에만 입력)</span>
-                                </label>
-                                <div class="input-group">
-                                    <input type="password" 
-                                           class="form-control" 
-                                           th:field="*{password}"
-                                           th:classappend="${#fields.hasErrors('password')} ? 'is-invalid'"
-                                           placeholder="비밀번호를 입력하세요"
-                                           id="passwordInput">
-                                    <button class="btn btn-outline-secondary password-toggle" type="button" onclick="togglePassword()">
-                                        <i class="fas fa-eye" id="passwordToggleIcon"></i>
-                                    </button>
-                                </div>
-                                <div class="form-help">최소 8자 이상 입력해주세요.</div>
-                                <div class="invalid-feedback" th:if="${#fields.hasErrors('password')}" th:errors="*{password}"></div>
-                            </div>
-                            
-                            <!-- 전화번호 -->
-                            <div class="col-md-6 mb-3">
-                                <label for="phone" class="form-label">전화번호</label>
-                                <input type="tel" 
-                                       class="form-control" 
-                                       th:field="*{phone}"
-                                       th:classappend="${#fields.hasErrors('phone')} ? 'is-invalid'"
-                                       placeholder="010-1234-5678">
-                                <div class="form-help">하이픈(-) 포함하여 입력해주세요.</div>
-                                <div class="invalid-feedback" th:if="${#fields.hasErrors('phone')}" th:errors="*{phone}"></div>
-                            </div>
-                        </div>
-                        
-                        <div class="row">
-                            <!-- 역할 -->
-                            <div class="col-md-6 mb-3">
-                                <label for="role" class="form-label">
-                                    역할 <span class="required">*</span>
-                                </label>
-                                <select class="form-select" 
-                                        th:field="*{role}"
-                                        th:classappend="${#fields.hasErrors('role')} ? 'is-invalid'">
-                                    <option value="">역할을 선택하세요</option>
-                                    <option th:each="role : ${roles}" 
-                                            th:value="${role}" 
-                                            th:text="${role.displayName}"></option>
+                            <!-- 카테고리 -->
+                            <div class="col-md-6">
+                                <label class="form-label">카테고리</label>
+                                <select class="form-select" th:field="*{categoryId}">
+                                    <option value="">선택 안함</option>
+                                    <option th:each="cat : ${categories}"
+                                            th:value="${cat.id}"
+                                            th:text="${cat.categoryName}"></option>
                                 </select>
-                                <div class="invalid-feedback" th:if="${#fields.hasErrors('role')}" th:errors="*{role}"></div>
                             </div>
-                            
-                            <!-- 상태 -->
-                            <div class="col-md-6 mb-3">
-                                <label for="status" class="form-label">
-                                    상태 <span class="required">*</span>
-                                </label>
-                                <select class="form-select" 
-                                        th:field="*{status}"
-                                        th:classappend="${#fields.hasErrors('status')} ? 'is-invalid'">
-                                    <option value="">상태를 선택하세요</option>
-                                    <option th:each="status : ${statuses}" 
-                                            th:value="${status}" 
-                                            th:text="${status.displayName}"></option>
-                                </select>
-                                <div class="invalid-feedback" th:if="${#fields.hasErrors('status')}" th:errors="*{status}"></div>
+                            <!-- 제목 -->
+                            <div class="col-md-8">
+                                <label class="form-label">제목 <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control"
+                                       th:field="*{title}"
+                                       th:classappend="${#fields.hasErrors('title')} ? 'is-invalid'"
+                                       placeholder="도서 제목">
+                                <div class="invalid-feedback" th:errors="*{title}"></div>
+                            </div>
+                            <!-- 총 수량 -->
+                            <div class="col-md-4">
+                                <label class="form-label">총 수량 <span class="text-danger">*</span></label>
+                                <input type="number" class="form-control"
+                                       th:field="*{totalCopies}"
+                                       th:classappend="${#fields.hasErrors('totalCopies')} ? 'is-invalid'"
+                                       min="1">
+                                <div class="invalid-feedback" th:errors="*{totalCopies}"></div>
+                            </div>
+                            <!-- 저자 -->
+                            <div class="col-md-6">
+                                <label class="form-label">저자 <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control"
+                                       th:field="*{author}"
+                                       th:classappend="${#fields.hasErrors('author')} ? 'is-invalid'"
+                                       placeholder="저자명">
+                                <div class="invalid-feedback" th:errors="*{author}"></div>
+                            </div>
+                            <!-- 출판사 -->
+                            <div class="col-md-6">
+                                <label class="form-label">출판사</label>
+                                <input type="text" class="form-control" th:field="*{publisher}" placeholder="출판사">
+                            </div>
+                            <!-- 출판일 -->
+                            <div class="col-md-4">
+                                <label class="form-label">출판일</label>
+                                <input type="date" class="form-control" th:field="*{publicationDate}">
+                            </div>
+                            <!-- 도서 설명 -->
+                            <div class="col-12">
+                                <label class="form-label">도서 설명</label>
+                                <textarea class="form-control" th:field="*{description}" rows="3"
+                                          placeholder="도서 소개 (최대 1000자)"></textarea>
                             </div>
                         </div>
-                        
+
                         <hr class="my-4">
-                        
-                        <!-- 버튼 그룹 -->
                         <div class="d-flex justify-content-end gap-2">
-                            <a th:href="${userId != null ? '/admin/users/' + userId : '/admin/users'}" 
-                               class="btn btn-secondary">
-                                <i class="fas fa-times"></i> 취소
+                            <a th:href="@{/admin/books}" class="btn btn-secondary">
+                                <i class="fas fa-times me-1"></i>취소
                             </a>
                             <button type="submit" class="btn btn-primary">
-                                <i th:class="${userId == null ? 'fas fa-plus' : 'fas fa-save'}"></i>
-                                <span th:text="${userId == null ? '사용자 추가' : '수정 저장'}"></span>
+                                <i th:class="${bookId == null ? 'fas fa-plus' : 'fas fa-save'}" class="me-1"></i>
+                                <span th:text="${bookId == null ? '도서 등록' : '수정 저장'}"></span>
                             </button>
                         </div>
                     </form>
@@ -1720,89 +1656,230 @@ public class UserController {
         </div>
     </div>
 </div>
+```
+
+### 7.4 대출 현황 페이지 (admin/loan/list.html)
+
+```html
+<!DOCTYPE html>
+<html lang="ko"
+      xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+
+<th:block layout:fragment="css">
+<style>
+    .overdue-row { background-color: #fff3cd !important; }
+    .tab-active  { border-bottom: 3px solid #0d6efd; font-weight:600; }
+</style>
+</th:block>
+
+<div layout:fragment="content">
+
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h4 class="mb-0"><i class="fas fa-hand-holding-heart me-2"></i>대출 현황</h4>
+        <!-- 연체 건수 경고 배지 -->
+        <span th:if="${overdueCount > 0}" class="badge bg-danger fs-6">
+            <i class="fas fa-exclamation-triangle me-1"></i>연체 <span th:text="${overdueCount}"></span>건
+        </span>
+    </div>
+
+    <!-- 상태 탭 필터 -->
+    <ul class="nav nav-tabs mb-4">
+        <li class="nav-item">
+            <a class="nav-link" th:href="@{/admin/loans}"
+               th:classappend="${searchDto.status == null and !searchDto.onlyOverdue} ? 'active tab-active'">
+               전체
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link" th:href="@{/admin/loans(status='REQUESTED')}"
+               th:classappend="${searchDto.status?.name() == 'REQUESTED'} ? 'active tab-active'">
+               승인 대기
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link" th:href="@{/admin/loans(status='BORROWED')}"
+               th:classappend="${searchDto.status?.name() == 'BORROWED' and !searchDto.onlyOverdue} ? 'active tab-active'">
+               대출중
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link text-danger" th:href="@{/admin/loans(onlyOverdue=true)}"
+               th:classappend="${searchDto.onlyOverdue} ? 'active tab-active'">
+               <i class="fas fa-exclamation-triangle me-1"></i>연체
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link" th:href="@{/admin/loans(status='RETURNED')}"
+               th:classappend="${searchDto.status?.name() == 'RETURNED'} ? 'active tab-active'">
+               반납완료
+            </a>
+        </li>
+    </ul>
+
+    <!-- 결과 카운트 -->
+    <p class="text-muted small mb-2">
+        총 <strong th:text="${loans.totalElements}">0</strong>건
+        (<strong th:text="${loans.number + 1}">1</strong> / <strong th:text="${loans.totalPages}">1</strong> 페이지)
+    </p>
+
+    <!-- 대출 목록 테이블 -->
+    <div class="card shadow-sm">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-dark">
+                    <tr>
+                        <th>대출번호</th>
+                        <th>회원명</th>
+                        <th>도서명</th>
+                        <th>대출일</th>
+                        <th>반납예정일</th>
+                        <th>반납일</th>
+                        <th class="text-center">상태</th>
+                        <th class="text-center">연체일/연체료</th>
+                        <th>처리</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr th:each="loan : ${loans.content}"
+                        th:classappend="${loan.overdue} ? 'overdue-row'">
+                        <td class="small text-monospace" th:text="${loan.loanNumber}"></td>
+                        <td>
+                            <div th:text="${loan.memberName}"></div>
+                            <small class="text-muted" th:text="${loan.memberNumber}"></small>
+                        </td>
+                        <td th:text="${loan.bookTitle}"></td>
+                        <td th:text="${loan.loanDate}"></td>
+                        <td>
+                            <!-- 연체면 반납예정일을 빨간색으로 -->
+                            <span th:text="${loan.dueDate}"
+                                  th:classappend="${loan.overdue} ? 'text-danger fw-bold'"></span>
+                        </td>
+                        <td th:text="${loan.returnDate ?: '-'}"></td>
+                        <td class="text-center">
+                            <span class="badge"
+                                  th:classappend="${loan.status.name() == 'BORROWED'  ? 'bg-primary'   :
+                                                   loan.status.name() == 'OVERDUE'   ? 'bg-danger'    :
+                                                   loan.status.name() == 'RETURNED'  ? 'bg-success'   :
+                                                   loan.status.name() == 'REQUESTED' ? 'bg-warning text-dark' : 'bg-secondary'}"
+                                  th:text="${loan.status.displayName}"></span>
+                        </td>
+                        <td class="text-center">
+                            <span th:if="${loan.overdue}" class="text-danger small">
+                                <th:block th:text="${loan.overdueDays}"></th:block>일
+                                / <th:block th:text="${#numbers.formatInteger(loan.overdueFee,1,'COMMA')}"></th:block>원
+                            </span>
+                            <span th:unless="${loan.overdue}">-</span>
+                        </td>
+                        <td>
+                            <!-- 승인 대기 → [승인] 버튼 -->
+                            <button th:if="${loan.status.name() == 'REQUESTED'}"
+                                    class="btn btn-sm btn-success"
+                                    th:onclick="|approveLoan(${loan.id})|">
+                                <i class="fas fa-check me-1"></i>승인
+                            </button>
+                            <!-- 대출중·연체 → [반납] 버튼 -->
+                            <button th:if="${loan.status.name() == 'BORROWED' or loan.status.name() == 'OVERDUE'}"
+                                    class="btn btn-sm btn-outline-primary"
+                                    th:onclick="|returnLoan(${loan.id}, '${loan.bookTitle}')|">
+                                <i class="fas fa-undo me-1"></i>반납
+                            </button>
+                            <span th:if="${loan.status.name() == 'RETURNED'}" class="text-muted small">완료</span>
+                        </td>
+                    </tr>
+                    <tr th:if="${loans.content.empty}">
+                        <td colspan="9" class="text-center text-muted py-5">
+                            <i class="fas fa-inbox fa-2x mb-2 d-block"></i>해당하는 대출 내역이 없습니다.
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 페이지네이션 -->
+    <nav class="mt-3 d-flex justify-content-center" th:if="${loans.totalPages > 1}">
+        <ul class="pagination pagination-sm">
+            <li class="page-item" th:classappend="${!loans.hasPrevious()} ? 'disabled'">
+                <a class="page-link"
+                   th:href="${loans.hasPrevious()} ? @{/admin/loans(status=${searchDto.status}, onlyOverdue=${searchDto.onlyOverdue}, page=${loans.number - 1})} : '#'">
+                    <i class="fas fa-chevron-left"></i>
+                </a>
+            </li>
+            <li class="page-item"
+                th:each="p : ${#numbers.sequence(T(java.lang.Math).max(0, loans.number - 2), T(java.lang.Math).min(loans.totalPages - 1, loans.number + 2))}"
+                th:classappend="${p == loans.number} ? 'active'">
+                <a class="page-link"
+                   th:href="@{/admin/loans(status=${searchDto.status}, onlyOverdue=${searchDto.onlyOverdue}, page=${p})}"
+                   th:text="${p + 1}"></a>
+            </li>
+            <li class="page-item" th:classappend="${!loans.hasNext()} ? 'disabled'">
+                <a class="page-link"
+                   th:href="${loans.hasNext()} ? @{/admin/loans(status=${searchDto.status}, onlyOverdue=${searchDto.onlyOverdue}, page=${loans.number + 1})} : '#'">
+                    <i class="fas fa-chevron-right"></i>
+                </a>
+            </li>
+        </ul>
+    </nav>
+
+</div>
 
 <th:block layout:fragment="script">
-    <script>
-        // 비밀번호 보기/숨기기 토글
-        function togglePassword() {
-            const passwordInput = document.getElementById('passwordInput');
-            const toggleIcon = document.getElementById('passwordToggleIcon');
-            
-            if (passwordInput.type === 'password') {
-                passwordInput.type = 'text';
-                toggleIcon.className = 'fas fa-eye-slash';
-            } else {
-                passwordInput.type = 'password';
-                toggleIcon.className = 'fas fa-eye';
-            }
-        }
-        
-        // 폼 제출 전 확인
-        document.querySelector('form').addEventListener('submit', function(e) {
-            const isEdit = [[${userId != null}]];
-            const username = document.getElementById('username').value;
-            
-            let message = isEdit ? 
-                `'${username}' 사용자 정보를 수정하시겠습니까?` : 
-                `'${username}' 사용자를 생성하시겠습니까?`;
-                
-            if (!confirm(message)) {
-                e.preventDefault();
-            }
-        });
-        
-        // 전화번호 자동 포맷팅
-        document.getElementById('phone').addEventListener('input', function(e) {
-            let value = e.target.value.replace(/[^0-9]/g, '');
-            if (value.length >= 11) {
-                value = value.replace(/(\d{3})(\d{4})(\d{4})/, '$1-$2-$3');
-            } else if (value.length >= 7) {
-                value = value.replace(/(\d{3})(\d{3})(\d+)/, '$1-$2-$3');
-            } else if (value.length >= 3) {
-                value = value.replace(/(\d{3})(\d+)/, '$1-$2');
-            }
-            e.target.value = value;
-        });
-    </script>
+<script>
+function approveLoan(loanId) {
+    if (!confirm('해당 대출을 승인하시겠습니까?')) return;
+    fetch(`/admin/loans/${loanId}/approve`, {
+        method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' }
+    })
+    .then(r => r.json())
+    .then(data => {
+        alert(data.message || data.error);
+        location.reload();
+    });
+}
+
+function returnLoan(loanId, title) {
+    if (!confirm(`"${title}" 도서의 반납을 처리하시겠습니까?`)) return;
+    fetch(`/admin/loans/${loanId}/return`, {
+        method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' }
+    })
+    .then(r => r.json())
+    .then(data => {
+        alert(data.message || data.error);
+        location.reload();
+    });
+}
+</script>
 </th:block>
 ```
 
 ## 8. Enum 클래스 정의
 
 ```java
-// 사용자 역할
-public enum UserRole {
-    ADMIN("관리자"),
-    USER("일반사용자"),
-    MANAGER("매니저");
-    
+// 대출 상태
+public enum LoanStatus {
+    REQUESTED("승인 대기"),   // 회원이 신청, 관리자 승인 전
+    APPROVED ("승인 완료"),   // 관리자 승인, 아직 수령 전
+    BORROWED ("대출중"),      // 도서 수령 완료
+    RETURNED ("반납완료"),    // 반납 처리 완료
+    OVERDUE  ("연체"),        // 반납예정일 초과
+    CANCELLED("취소");        // 관리자 또는 회원이 취소
+
     private final String displayName;
-    
-    UserRole(String displayName) {
-        this.displayName = displayName;
-    }
-    
-    public String getDisplayName() {
-        return displayName;
-    }
+    LoanStatus(String displayName) { this.displayName = displayName; }
+    public String getDisplayName()  { return displayName; }
 }
 
-// 사용자 상태
-public enum UserStatus {
-    ACTIVE("활성"),
-    INACTIVE("비활성"),
-    SUSPENDED("정지"),
-    DELETED("삭제");
-    
+// 회원 상태
+public enum MemberStatus {
+    ACTIVE   ("활성"),     // 정상 이용 중
+    SUSPENDED("정지"),     // 연체료 미납 등으로 대출 정지
+    WITHDRAWN("탈퇴");     // 회원 탈퇴
+
     private final String displayName;
-    
-    UserStatus(String displayName) {
-        this.displayName = displayName;
-    }
-    
-    public String getDisplayName() {
-        return displayName;
-    }
+    MemberStatus(String displayName) { this.displayName = displayName; }
+    public String getDisplayName()   { return displayName; }
 }
 ```
 
@@ -1813,30 +1890,65 @@ public enum UserStatus {
 ```yaml
 spring:
   datasource:
-    url: jdbc:h2:mem:testdb
-    driver-class-name: org.h2.Driver
-    username: sa
-    password: 
-    
+    url: jdbc:mysql://localhost:3306/library_db?useSSL=false&characterEncoding=UTF-8&serverTimezone=Asia/Seoul
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    username: root
+    password: 1234
+
   jpa:
     hibernate:
-      ddl-auto: create-drop
+      ddl-auto: validate          # Flyway가 스키마를 관리하므로 validate 사용
     show-sql: true
     properties:
       hibernate:
         format_sql: true
-        
+        default_batch_fetch_size: 100
+
+  # Flyway DB 마이그레이션
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
   thymeleaf:
-    cache: false
+    cache: false                  # 개발 중에는 false, 운영에서는 true
     prefix: classpath:/templates/
     suffix: .html
-    
-  web:
-    resources:
-      static-locations: classpath:/static/
-      
+
+  # 관리자 세션 설정
+  session:
+    timeout: 30m                  # 관리자 세션 30분
+
 server:
   port: 8080
+
+# 도서관 비즈니스 규칙 설정 (커스텀 프로퍼티)
+library:
+  loan:
+    max-period-days: 14           # 기본 대출 기간
+    max-per-member:  5            # 회원당 최대 동시 대출 수
+    overdue-fee-per-day: 100      # 연체료 (1일당 원)
+  admin:
+    login-url: /admin/login
+    logout-url: /admin/logout
+```
+
+### 9.2 관리자 페이지 URL 구조 요약
+
+| URL | 메서드 | 설명 |
+|-----|--------|------|
+| `GET  /admin` | GET | 대시보드 (통계 카드 4개) |
+| `GET  /admin/books` | GET | 도서 목록 (검색·페이징) |
+| `GET  /admin/books/new` | GET | 도서 등록 폼 |
+| `POST /admin/books/new` | POST | 도서 등록 처리 |
+| `GET  /admin/books/{id}` | GET | 도서 상세 |
+| `GET  /admin/books/{id}/edit` | GET | 도서 수정 폼 |
+| `POST /admin/books/{id}/edit` | POST | 도서 수정 처리 |
+| `DELETE /admin/books/{id}` | DELETE (AJAX) | 도서 삭제 |
+| `GET  /admin/loans` | GET | 대출 현황 (탭 필터: 전체/승인대기/대출중/연체/반납완료) |
+| `POST /admin/loans/{id}/approve` | POST (AJAX) | 대출 승인 |
+| `POST /admin/loans/{id}/return` | POST (AJAX) | 반납 처리 |
+| `GET  /admin/members` | GET | 회원 목록 |
   
 logging:
   level:

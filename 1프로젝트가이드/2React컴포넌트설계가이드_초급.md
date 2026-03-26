@@ -1,5 +1,5 @@
 # React 컴포넌트 설계 가이드
-**ReactJS + ECMAScript JSX + Vite + React Router + RTK 환경**
+**ReactJS + ECMAScript JSX + Vite + React Router + Zustand + Axios 환경**
 
 ## 1. React 컴포넌트 설계 원칙
 
@@ -28,14 +28,26 @@
 ```
 src/
 ├── components/
-│   ├── common/          # 재사용 가능한 공통 컴포넌트
-│   ├── layout/          # 레이아웃 관련 컴포넌트
-│   └── features/        # 기능별 컴포넌트
+│   ├── common/          # 재사용 가능한 공통 컴포넌트 (LoadingSpinner, ErrorMessage 등)
+│   ├── layout/          # 레이아웃 컴포넌트 (Header, Footer)
+│   └── ui/              # shadcn/ui 컴포넌트 (Button, Badge, Dialog 등)
 ├── pages/               # 페이지 컴포넌트
-├── hooks/               # 커스텀 훅
-├── store/               # Redux 스토어
-├── services/            # API 관련 서비스
-└── utils/               # 유틸리티 함수
+│   ├── BookList/        # 도서 목록 페이지
+│   │   ├── index.jsx
+│   │   └── components/  # 페이지 전용 (BookDataGrid, LoanDialog, CategoryFilter 등)
+│   ├── MyLoan/          # 내 대출이력 페이지
+│   ├── Login/           # 로그인 페이지
+│   └── Register/        # 회원가입 페이지
+├── api/                 # axios 인스턴스 + API 함수
+│   ├── axiosInstance.js # 공통 axios 설정 + 인터셉터
+│   ├── authApi.js       # 인증 API
+│   ├── bookApi.js       # 도서 API
+│   └── loanApi.js       # 대출 API
+├── store/               # Zustand 스토어 (전역 상태 관리)
+│   ├── authStore.js     # 인증 상태 (token, email)
+│   ├── bookStore.js     # 도서 목록 상태 (books, loading, fetchBooks)
+│   └── loanStore.js     # 대출 상태 (loans, createLoan, returnBook)
+└── App.jsx              # 라우팅 + ProtectedRoute
 ```
 
 ## 2. React 컴포넌트 Props 설계 원칙
@@ -69,39 +81,121 @@ src/
   - 설정 관련 props는 `config` 객체로 통합
   - 이벤트 핸들러들은 `handlers` 객체로 통합 고려
 
-## 3. Redux(RTK) 상태관리 설계 원칙
+## 3. Zustand 상태관리 설계 원칙
 
 ### 3.1 상태 분리 원칙
 - **원칙**: 로컬 상태와 글로벌 상태를 명확히 구분하세요
-- **글로벌 상태**: 여러 컴포넌트에서 공유되는 상태
-  - 사용자 인증 정보
-  - 전역 설정 정보
-  - 캐시된 API 데이터
-- **로컬 상태**: 단일 컴포넌트나 작은 컴포넌트 그룹에서만 사용
-  - 폼 입력값
+- **글로벌 상태 (Zustand)**: 여러 컴포넌트에서 공유되는 상태
+  - 사용자 인증 정보 (token, email)
+  - API에서 가져온 데이터 (도서 목록, 대출 목록)
+  - 페이징 상태 (pageNo, totalPages)
+- **로컬 상태 (useState)**: 단일 컴포넌트 안에서만 사용
+  - 폼 입력값 (name, email, password)
   - 모달 열림/닫힘 상태
-  - 임시 UI 상태
+  - 로딩 상태
 
-### 3.2 Slice 설계 원칙
-- **원칙**: 기능 단위로 slice를 분리하세요
+### 3.2 Zustand 스토어 설계 원칙
+- **원칙**: 도메인(기능) 단위로 스토어를 분리하세요
 - **권고사항**:
-  - 하나의 slice는 하나의 도메인을 담당
-  - slice 이름은 명확하고 일관성 있게 작성
-  - 액션 타입은 `도메인/액션명` 형태로 작성
+  - `authStore.js` → 인증 상태 (token, email, login, logout)
+  - `bookStore.js` → 도서 목록, 검색/필터, 페이징, fetchBooks 액션
+  - `loanStore.js` → 대출이력, createLoan, fetchMyLoans, returnBook 액션
+  - 스토어가 커지면 기능별로 추가 분리
 
-### 3.3 상태 정규화
-- **원칙**: 중첩된 데이터는 정규화하여 관리하세요
-- **권고사항**:
-  - 배열 데이터는 id를 키로 하는 객체로 변환
-  - 중복 데이터를 최소화
-  - 관계형 데이터는 별도 slice로 분리
+### 3.3 스토어 구조 템플릿
 
-### 3.4 비동기 작업 관리
-- **원칙**: createAsyncThunk를 사용하여 비동기 작업을 관리하세요
-- **권고사항**:
-  - API 호출은 별도 서비스 파일로 분리
-  - 로딩, 성공, 실패 상태를 명확히 관리
-  - 에러 처리는 일관된 방식으로 구현
+```js
+// store/[도메인]Store.js — 기본 구조
+import { create } from 'zustand';
+import { [도메인]Api } from '../api/[도메인]Api.js';
+
+const api = new [도메인]Api();
+
+export const use[도메인]Store = create((set, get) => ({
+    // ── 상태 (State) ────────────────────────────────
+    items: [],
+    selectedItem: null,
+    loading: false,
+    error: null,
+    // 페이징
+    pageNo: 0,
+    pageSize: 5,
+    totalPages: 0,
+    totalElements: 0,
+
+    // ── 액션 (Actions) ──────────────────────────────
+    // 목록 조회 (페이징)
+    loadPage: async (pageNo = 0) => {
+        set({ loading: true, error: null });
+        try {
+            const data = await api.getPage({ pageNo, pageSize: get().pageSize });
+            set({
+                items: data.content,
+                pageNo: data.pageNo,
+                totalPages: data.totalPages,
+                totalElements: data.totalElements,
+            });
+        } catch (err) {
+            set({ error: err.message });
+        } finally {
+            set({ loading: false });
+        }
+    },
+
+    // 단건 생성
+    create: async (itemData) => {
+        const data = await api.create(itemData);
+        await get().loadPage(get().pageNo);  // 목록 새로고침
+        return data;
+    },
+
+    // 단건 수정
+    update: async (id, itemData) => {
+        const data = await api.update(id, itemData);
+        await get().loadPage(get().pageNo);
+        return data;
+    },
+
+    // 단건 삭제
+    delete: async (id) => {
+        await api.delete(id);
+        await get().loadPage(get().pageNo);
+    },
+
+    // 선택 항목 관리
+    selectItem: (item) => set({ selectedItem: item }),
+    clearSelected: () => set({ selectedItem: null }),
+}));
+```
+
+### 3.4 비동기 작업 패턴
+
+```js
+// 컴포넌트에서 스토어 사용
+import { useBookStore } from '../../store/bookStore.js';
+import { useLoanStore } from '../../store/loanStore.js';
+
+export default function BookListPage() {
+    const { books, loading, pageNo, fetchBooks } = useBookStore();
+
+    useEffect(() => {
+        fetchBooks({ keyword: '', category: '전체', page: 0 });  // 마운트 시 첫 페이지 로드
+    }, []);
+
+    const handleLoan = async (bookId) => {
+        try {
+            await loanStore.createLoan(bookId);
+            toast.success('대출 신청이 완료되었습니다');
+        } catch (err) {
+            toast.error(err.message);  // 서버 에러 메시지 표시
+        }
+    };
+
+    if (loading) return <LoadingSpinner />;
+
+    return (/* JSX */);
+}
+```
 
 ## 4. 실제 코드 예시
 
@@ -172,411 +266,507 @@ Button.propTypes = {
 export default Button;
 ```
 
-#### 사용자 카드 컴포넌트
+#### 도서 카드 컴포넌트
 ```jsx
-// components/features/UserCard/UserCard.jsx
+// pages/BookList/components/BookCard.jsx
 import PropTypes from 'prop-types';
-import Button from '../../common/Button/Button';
-import './UserCard.css';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 
-const UserCard = ({ user, onEdit, onDelete, isLoading = false }) => {
-  const { id, name, email, avatar, role } = user;
+const BookCard = ({ book, onLoan, isLoading = false }) => {
+  const { id, title, author, category, availableCopies } = book;
 
-  const handleEdit = () => {
-    onEdit?.(user);
-  };
-
-  const handleDelete = () => {
-    if (window.confirm('정말 삭제하시겠습니까?')) {
-      onDelete?.(id);
-    }
+  const handleLoan = () => {
+    onLoan?.(book);
   };
 
   return (
-    <div className="user-card">
-      <div className="user-card__avatar">
-        <img src={avatar} alt={`${name}의 프로필`} />
+    <div className="rounded-lg border p-4 space-y-2">
+      <div>
+        <h3 className="font-semibold text-base">{title}</h3>
+        <p className="text-sm text-neutral-500">{author}</p>
+        <span className="text-xs text-neutral-400">{category}</span>
       </div>
-      
-      <div className="user-card__info">
-        <h3 className="user-card__name">{name}</h3>
-        <p className="user-card__email">{email}</p>
-        <span className="user-card__role">{role}</span>
-      </div>
-      
-      <div className="user-card__actions">
-        <Button 
-          variant="secondary" 
-          size="small" 
-          onClick={handleEdit}
-          disabled={isLoading}
+
+      <div className="flex items-center justify-between">
+        {/* 재고 상태 뱃지 */}
+        <Badge variant={availableCopies > 0 ? 'success' : 'destructive'}>
+          {availableCopies > 0 ? `●${availableCopies}권 대출 가능` : '○ 품절'}
+        </Badge>
+
+        {/* 대출 버튼 */}
+        <Button
+          size="sm"
+          disabled={availableCopies === 0 || isLoading}
+          onClick={handleLoan}
         >
-          편집
-        </Button>
-        <Button 
-          variant="danger" 
-          size="small" 
-          onClick={handleDelete}
-          disabled={isLoading}
-        >
-          삭제
+          {availableCopies > 0 ? '대출 신청' : '품절'}
         </Button>
       </div>
     </div>
   );
 };
 
-UserCard.propTypes = {
-  user: PropTypes.shape({
-    id: PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
-    name: PropTypes.string.isRequired,
-    email: PropTypes.string.isRequired,
-    avatar: PropTypes.string,
-    role: PropTypes.string,
+BookCard.propTypes = {
+  book: PropTypes.shape({
+    id: PropTypes.number.isRequired,
+    title: PropTypes.string.isRequired,
+    author: PropTypes.string.isRequired,
+    category: PropTypes.string,
+    availableCopies: PropTypes.number.isRequired,
   }).isRequired,
-  onEdit: PropTypes.func,
-  onDelete: PropTypes.func,
+  onLoan: PropTypes.func,
   isLoading: PropTypes.bool,
 };
 
-export default UserCard;
+export default BookCard;
 ```
 
-#### 사용자 목록 페이지 컴포넌트
+#### 도서 목록 페이지 컴포넌트 (Zustand 사용)
 ```jsx
-// pages/UsersPage/UsersPage.jsx
-import { useEffect } from 'react';
-import { useDispatch, useSelector } from 'react-redux';
-import UserCard from '../../components/features/UserCard/UserCard';
-import Button from '../../components/common/Button/Button';
-import { fetchUsers, deleteUser } from '../../store/slices/usersSlice';
-import './UsersPage.css';
+// pages/BookList/index.jsx
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useBookStore } from '../../store/bookStore.js';
+import { useAuthStore } from '../../store/authStore.js';
+import BookCard from './components/BookCard';
+import LoanDialog from './components/LoanDialog';
+import { Input } from '@/components/ui/input';
+import { toast } from 'sonner';
 
-const UsersPage = () => {
-  const dispatch = useDispatch();
-  const { users, loading, error } = useSelector(state => state.users);
+const BookListPage = () => {
+  // ── 로컬 상태
+  const [keyword, setKeyword] = useState('');
+  const [selectedBook, setSelectedBook] = useState(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+
+  // ── Zustand 전역 상태
+  const { books, loading, fetchBooks } = useBookStore();
+  const { token } = useAuthStore();
+  const navigate = useNavigate();
 
   useEffect(() => {
-    dispatch(fetchUsers());
-  }, [dispatch]);
+    fetchBooks({ keyword: '', category: '전체', page: 0 });
+  }, []);
 
-  const handleEditUser = (user) => {
-    // 편집 로직 또는 라우팅
-    console.log('Edit user:', user);
+  const handleLoanClick = (book) => {
+    if (!token) {
+      toast.error('로그인이 필요합니다');
+      navigate('/login');
+      return;
+    }
+    setSelectedBook(book);
+    setIsDialogOpen(true);
   };
 
-  const handleDeleteUser = (userId) => {
-    dispatch(deleteUser(userId));
-  };
-
-  if (loading) {
-    return <div className="users-page__loading">로딩 중...</div>;
-  }
-
-  if (error) {
-    return <div className="users-page__error">에러: {error}</div>;
-  }
+  if (loading) return <div className="text-center py-10">로딩 중...</div>;
 
   return (
-    <div className="users-page">
-      <div className="users-page__header">
-        <h1>사용자 관리</h1>
-        <Button onClick={() => console.log('Add user')}>
-          사용자 추가
-        </Button>
-      </div>
+    <div className="container mx-auto py-6 space-y-4">
+      <h1 className="text-2xl font-bold">📚 도서 목록</h1>
 
-      <div className="users-page__grid">
-        {users.map(user => (
-          <UserCard
-            key={user.id}
-            user={user}
-            onEdit={handleEditUser}
-            onDelete={handleDeleteUser}
-            isLoading={loading}
-          />
-        ))}
-      </div>
+      <Input
+        placeholder="도서명 또는 저자 검색..."
+        value={keyword}
+        onChange={(e) => setKeyword(e.target.value)}
+        onKeyDown={(e) => e.key === 'Enter' && fetchBooks({ keyword, page: 0 })}
+      />
+
+      {books.length === 0 ? (
+        <p className="text-center text-neutral-500 py-12">검색 결과가 없습니다.</p>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {books.map(book => (
+            <BookCard
+              key={book.id}
+              book={book}
+              onLoan={handleLoanClick}
+            />
+          ))}
+        </div>
+      )}
+
+      {selectedBook && (
+        <LoanDialog
+          open={isDialogOpen}
+          onOpenChange={setIsDialogOpen}
+          bookId={selectedBook.id}
+          bookTitle={selectedBook.title}
+          author={selectedBook.author}
+        />
+      )}
     </div>
   );
 };
 
-export default UsersPage;
+export default BookListPage;
 ```
 
-### 4.2 Redux Store 설계 예시
+### 4.2 Zustand 스토어 설계 예시
 
-#### Users Slice
+#### 도서 스토어 (bookStore.js)
+
 ```jsx
-// store/slices/usersSlice.js
-import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
-import { usersAPI } from '../../services/api';
+// store/bookStore.js
+import { create } from 'zustand';
+import { fetchBooksApi } from '../api/bookApi.js';
 
-// 비동기 액션 생성
-export const fetchUsers = createAsyncThunk(
-  'users/fetchUsers',
-  async (_, { rejectWithValue }) => {
-    try {
-      const response = await usersAPI.getUsers();
-      return response.data;
-    } catch (error) {
-      return rejectWithValue(error.response?.data?.message || '사용자 목록을 불러오는데 실패했습니다.');
-    }
-  }
-);
+export const useBookStore = create((set, get) => ({
 
-export const deleteUser = createAsyncThunk(
-  'users/deleteUser',
-  async (userId, { rejectWithValue }) => {
-    try {
-      await usersAPI.deleteUser(userId);
-      return userId;
-    } catch (error) {
-      return rejectWithValue(error.response?.data?.message || '사용자 삭제에 실패했습니다.');
-    }
-  }
-);
+    // ── 상태 ──────────────────────────────────────────────────
+    books: [],
+    loading: false,
+    error: null,
+    pageNo: 0,
+    pageSize: 10,
+    totalPages: 0,
+    totalElements: 0,
 
-export const createUser = createAsyncThunk(
-  'users/createUser',
-  async (userData, { rejectWithValue }) => {
-    try {
-      const response = await usersAPI.createUser(userData);
-      return response.data;
-    } catch (error) {
-      return rejectWithValue(error.response?.data?.message || '사용자 생성에 실패했습니다.');
-    }
-  }
-);
-
-// 초기 상태
-const initialState = {
-  users: [],
-  selectedUser: null,
-  loading: false,
-  error: null,
-  totalCount: 0,
-  currentPage: 1,
-};
-
-// Slice 생성
-const usersSlice = createSlice({
-  name: 'users',
-  initialState,
-  reducers: {
-    // 동기 액션들
-    clearError: (state) => {
-      state.error = null;
+    // ── 도서 목록 조회 (검색 + 필터 + 페이징) ─────────────────
+    fetchBooks: async ({ keyword = '', category = '전체', page = 0 } = {}) => {
+        set({ loading: true, error: null });
+        try {
+            const data = await fetchBooksApi({
+                keyword, category,
+                page,
+                size: get().pageSize,
+            });
+            set({
+                books: data.content,
+                pageNo: data.page.number,
+                totalPages: data.page.totalPages,
+                totalElements: data.page.totalElements,
+            });
+        } catch (err) {
+            set({ error: err.message });
+            throw err;  // 컴포넌트에서 catch 가능하도록 re-throw
+        } finally {
+            set({ loading: false });
+        }
     },
-    setSelectedUser: (state, action) => {
-      state.selectedUser = action.payload;
-    },
-    clearSelectedUser: (state) => {
-      state.selectedUser = null;
-    },
-    setCurrentPage: (state, action) => {
-      state.currentPage = action.payload;
-    },
-  },
-  extraReducers: (builder) => {
-    builder
-      // fetchUsers 액션 처리
-      .addCase(fetchUsers.pending, (state) => {
-        state.loading = true;
-        state.error = null;
-      })
-      .addCase(fetchUsers.fulfilled, (state, action) => {
-        state.loading = false;
-        state.users = action.payload;
-        state.totalCount = action.payload.length;
-      })
-      .addCase(fetchUsers.rejected, (state, action) => {
-        state.loading = false;
-        state.error = action.payload;
-      })
-      // deleteUser 액션 처리
-      .addCase(deleteUser.pending, (state) => {
-        state.loading = true;
-      })
-      .addCase(deleteUser.fulfilled, (state, action) => {
-        state.loading = false;
-        state.users = state.users.filter(user => user.id !== action.payload);
-        state.totalCount -= 1;
-      })
-      .addCase(deleteUser.rejected, (state, action) => {
-        state.loading = false;
-        state.error = action.payload;
-      })
-      // createUser 액션 처리
-      .addCase(createUser.pending, (state) => {
-        state.loading = true;
-      })
-      .addCase(createUser.fulfilled, (state, action) => {
-        state.loading = false;
-        state.users.push(action.payload);
-        state.totalCount += 1;
-      })
-      .addCase(createUser.rejected, (state, action) => {
-        state.loading = false;
-        state.error = action.payload;
-      });
-  },
-});
 
-export const { clearError, setSelectedUser, clearSelectedUser, setCurrentPage } = usersSlice.actions;
-export default usersSlice.reducer;
+    // ── 페이지 변경 ────────────────────────────────────────────
+    changePage: (page) => {
+        const { keyword = '', category = '전체' } = get();
+        get().fetchBooks({ keyword, category, page });
+    },
+}));
 ```
 
-#### Store 설정
+#### 대출 스토어 (loanStore.js)
+
 ```jsx
-// store/index.js
-import { configureStore } from '@reduxjs/toolkit';
-import usersReducer from './slices/usersSlice';
-import authReducer from './slices/authSlice';
+// store/loanStore.js
+import { create } from 'zustand';
+import { getMyLoansApi, createLoanApi, returnBookApi } from '../api/loanApi.js';
 
-export const store = configureStore({
-  reducer: {
-    users: usersReducer,
-    auth: authReducer,
-  },
-  middleware: (getDefaultMiddleware) =>
-    getDefaultMiddleware({
-      serializableCheck: {
-        ignoredActions: ['persist/PERSIST', 'persist/REHYDRATE'],
-      },
-    }),
-});
+export const useLoanStore = create((set, get) => ({
 
-export default store;
+    // ── 상태 ──────────────────────────────────────────────────
+    loans: [],
+    loading: false,
+    error: null,
+
+    // ── 내 대출이력 조회 ────────────────────────────────────────
+    fetchMyLoans: async () => {
+        set({ loading: true, error: null });
+        try {
+            const data = await getMyLoansApi();
+            set({ loans: data });
+        } catch (err) {
+            set({ error: err.message });
+        } finally {
+            set({ loading: false });
+        }
+    },
+
+    // ── 대출 신청 ──────────────────────────────────────────────
+    createLoan: async (bookId) => {
+        const data = await createLoanApi(bookId);
+        return data;  // { loanId, dueDate, status }
+    },
+
+    // ── 반납 신청 ──────────────────────────────────────────────
+    returnBook: async (loanId) => {
+        await returnBookApi(loanId);
+        await get().fetchMyLoans();  // 목록 새로고침
+    },
+}));
 ```
 
-### 4.3 API 서비스 예시
+#### 인증 스토어 (authStore.js)
 
 ```jsx
-// services/api.js
+// store/authStore.js
+import { create } from 'zustand';
+import { AuthApi } from '../api/authApi.js';
+
+const authApi = new AuthApi();
+
+export const TOKEN_KEY = 'auth_token';
+export const EMAIL_KEY = 'auth_email';
+
+export const useAuthStore = create((set) => ({
+
+    // localStorage에서 초기값 복원 → 새로고침 후 로그인 유지
+    token: localStorage.getItem(TOKEN_KEY) ?? null,
+    email: localStorage.getItem(EMAIL_KEY) ?? null,
+
+    // 로그인: 서버 요청 → localStorage 저장 → 스토어 업데이트
+    login: async (email, password) => {
+        const token = await authApi.login(email, password);
+        localStorage.setItem(TOKEN_KEY, token);
+        localStorage.setItem(EMAIL_KEY, email);
+        set({ token, email });
+    },
+
+    // 회원가입
+    register: async (userData) => {
+        await authApi.register(userData);
+    },
+
+    // 로그아웃: localStorage 삭제 → 스토어 초기화
+    logout: () => {
+        localStorage.removeItem(TOKEN_KEY);
+        localStorage.removeItem(EMAIL_KEY);
+        set({ token: null, email: null });
+    },
+}));
+```
+
+**Redux vs Zustand 비교:**
+
+| 항목 | Redux(RTK) | Zustand |
+|------|-----------|---------|
+| 설치 | `@reduxjs/toolkit react-redux` | `zustand` |
+| 코드량 | 많음 (slice, actions, extraReducers) | 적음 (create 하나로 완성) |
+| Provider | `<Provider store={store}>` 필요 | 불필요 |
+| 비동기 | `createAsyncThunk` | 일반 `async` 함수 |
+| 학습 곡선 | 높음 | 낮음 |
+| 적합 규모 | 대규모 앱 | 중소규모 앱 |
+
+### 4.3 API 함수 예시 (이 프로젝트 패턴)
+
+```jsx
+// api/axiosInstance.js — 공통 axios 인스턴스 + 인터셉터
 import axios from 'axios';
 
-// Axios 인스턴스 생성
-const apiClient = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api',
-  timeout: 10000,
-  headers: {
-    'Content-Type': 'application/json',
-  },
+const axiosInstance = axios.create({
+    baseURL: import.meta.env.VITE_API_BASE_URL,  // .env 파일에서 읽음
+    headers: { 'Content-Type': 'application/json' },
 });
 
-// 요청 인터셉터 (간단한 버전)
-apiClient.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem('accessToken');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
-  }
+// 요청 인터셉터: JWT 토큰 자동 첨부
+axiosInstance.interceptors.request.use(
+    config => {
+        const token = localStorage.getItem('auth_token');
+        if (token) config.headers.Authorization = `Bearer ${token}`;
+        return config;
+    },
+    error => Promise.reject(error)
 );
 
-// 응답 인터셉터 (간단한 버전)
-apiClient.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('accessToken');
-      window.location.href = '/login';
+// 응답 인터셉터: 에러 메시지 변환 + 401 자동 로그아웃
+axiosInstance.interceptors.response.use(
+    response => response,
+    error => {
+        if (error.response?.status === 401) {
+            localStorage.removeItem('auth_token');
+            localStorage.removeItem('auth_email');
+            window.location.href = '/login';
+            return Promise.reject(error);
+        }
+        const serverMessage = error.response?.data?.message;
+        if (serverMessage) error.message = serverMessage;
+        return Promise.reject(error);
     }
-    return Promise.reject(error);
-  }
 );
 
-// API 서비스 객체들
-export const usersAPI = {
-  getUsers: () => apiClient.get('/users'),
-  getUser: (id) => apiClient.get(`/users/${id}`),
-  createUser: (userData) => apiClient.post('/users', userData),
-  updateUser: (id, userData) => apiClient.put(`/users/${id}`, userData),
-  deleteUser: (id) => apiClient.delete(`/users/${id}`),
-};
-
-export const authAPI = {
-  login: (credentials) => apiClient.post('/auth/login', credentials),
-  logout: () => apiClient.post('/auth/logout'),
-  register: (userData) => apiClient.post('/auth/register', userData),
-  refreshToken: () => apiClient.post('/auth/refresh'),
-};
-
-export default apiClient;
+export default axiosInstance;
 ```
 
-### 4.4 커스텀 훅 예시
-
 ```jsx
-// hooks/useUsers.js
-import { useDispatch, useSelector } from 'react-redux';
-import { useEffect } from 'react';
-import { fetchUsers, deleteUser, clearError } from '../store/slices/usersSlice';
+// api/bookApi.js — 도서 API 함수
+import axios from './axiosInstance.js';
 
-export const useUsers = () => {
-  const dispatch = useDispatch();
-  const { users, loading, error, totalCount } = useSelector(state => state.users);
+// 도서 목록 조회 (검색 + 카테고리 + 페이징)
+export const fetchBooksApi = async ({ keyword = '', category = '', page = 0, size = 10 }) => {
+    const params = new URLSearchParams({ keyword, category, page, size });
+    const { data } = await axios.get(`/api/books?${params}`);
+    return data.data;  // { content, page: { number, totalPages, totalElements } }
+};
 
-  const loadUsers = () => {
-    dispatch(fetchUsers());
-  };
-
-  const removeUser = (userId) => {
-    dispatch(deleteUser(userId));
-  };
-
-  const clearUserError = () => {
-    dispatch(clearError());
-  };
-
-  return {
-    users,
-    loading,
-    error,
-    totalCount,
-    loadUsers,
-    removeUser,
-    clearUserError,
-  };
+// 도서 상세 조회
+export const fetchBookDetailApi = async (id) => {
+    try {
+        const { data } = await axios.get(`/api/books/${id}`);
+        return data.data;
+    } catch (err) {
+        if (err.response?.status === 404) return null;
+        throw err;
+    }
 };
 ```
 
-### 4.5 라우터 설정 예시
+```jsx
+// api/loanApi.js — 대출/반납 API 함수
+import axios from './axiosInstance.js';
+
+// 내 대출 목록 조회
+export const fetchMyLoansApi = async () => {
+    const { data } = await axios.get('/api/loans/my');
+    return data.data;  // Loan 배열
+};
+
+// 대출 신청
+export const createLoanApi = async (bookId) => {
+    const { data } = await axios.post('/api/loans', { bookId });
+    return data.data;  // 생성된 Loan
+};
+
+// 반납 신청
+export const returnBookApi = async (loanId) => {
+    const { data } = await axios.patch(`/api/loans/${loanId}/return`);
+    return data.data;  // 업데이트된 Loan
+};
+```
+
+### 4.4 커스텀 훅 예시 (Zustand 기반)
+
+Zustand를 사용하면 별도의 커스텀 훅 없이 스토어를 직접 사용할 수 있습니다.
+복잡한 로직이 있을 때만 커스텀 훅으로 분리하세요.
 
 ```jsx
-// App.jsx
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import { Provider } from 'react-redux';
-import { store } from './store';
-import Layout from './components/layout/Layout';
-import UsersPage from './pages/UsersPage/UsersPage';
-import UserDetailPage from './pages/UserDetailPage/UserDetailPage';
-import LoginPage from './pages/LoginPage/LoginPage';
+// 간단한 경우 — 커스텀 훅 없이 스토어 직접 사용
+import { useBookStore } from '../../store/bookStore.js';
 
-function App() {
-  return (
-    <Provider store={store}>
-      <Router>
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/" element={<Layout />}>
-            <Route index element={<UsersPage />} />
-            <Route path="users" element={<UsersPage />} />
-            <Route path="users/:id" element={<UserDetailPage />} />
-          </Route>
-        </Routes>
-      </Router>
-    </Provider>
-  );
+export default function BookListPage({ showToast }) {
+    const { books, loading, pageNo, totalPages, fetchBooks }
+        = useBookStore();
+
+    useEffect(() => { fetchBooks({ page: 0 }); }, []);
+
+    const handleBorrow = async (bookId) => {
+        try {
+            await useLoanStore.getState().createLoan(bookId);
+            showToast('대출 신청이 완료되었습니다.');
+        } catch (err) {
+            showToast(err.message, true);
+        }
+    };
+    // ...
+}
+```
+
+```jsx
+// 복잡한 로직이 있을 때 — 커스텀 훅으로 분리
+// hooks/useLoanActions.js
+import { useLoanStore } from '../store/loanStore.js';
+
+export const useLoanActions = (showToast) => {
+    const { createLoan, returnBook, fetchMyLoans }
+        = useLoanStore();
+
+    const handleBorrow = async (bookId) => {
+        try {
+            await createLoan(bookId);
+            showToast('대출 신청이 완료되었습니다.');
+            await fetchMyLoans();
+        } catch (err) {
+            showToast(err.message, true);
+            throw err;  // 폼에서 오류 처리가 필요하면 re-throw
+        }
+    };
+
+    const handleReturn = async (loanId) => {
+        try {
+            await returnBook(loanId);
+            showToast('반납이 완료되었습니다.');
+            await fetchMyLoans();
+        } catch (err) {
+            showToast(err.message, true);
+            throw err;
+        }
+    };
+
+    return { handleBorrow, handleReturn };
+};
+```
+
+### 4.5 라우터 설정 예시 (ProtectedRoute 포함)
+
+```jsx
+// App.jsx — Zustand 기반, Provider 불필요
+import { useState } from 'react';
+import { Routes, Route, NavLink, Navigate, useNavigate } from 'react-router-dom';
+import { useAuthStore } from './store/authStore.js';
+
+import Toast         from './components/common/Toast.jsx';
+import BookListPage  from './pages/BookListPage.jsx';
+import LoanListPage  from './pages/LoanListPage.jsx';
+import LoginPage     from './components/auth/LoginPage.jsx';
+import RegisterPage  from './components/auth/RegisterPage.jsx';
+
+// 토큰 없으면 /login으로 보내는 보호막
+function ProtectedRoute({ children }) {
+    const { token } = useAuthStore();
+    if (!token) return <Navigate to="/login" replace />;
+    return children;
 }
 
-export default App;
+export default function App() {
+    const [toast, setToast] = useState({ message: '', type: 'success', visible: false });
+
+    const showToast = (message, isError = false) => {
+        setToast({ message, type: isError ? 'error' : 'success', visible: true });
+        setTimeout(() => setToast(prev => ({ ...prev, visible: false })), 3000);
+    };
+
+    const { token, email, logout } = useAuthStore();
+    const navigate = useNavigate();
+
+    const handleLogout = () => {
+        logout();
+        navigate('/login');
+    };
+
+    return (
+        <div>
+            <Toast {...toast} />
+
+            {/* 로그인 상태일 때만 네비게이션 표시 */}
+            {token && (
+                <nav>
+                    <NavLink to="/books">도서 목록</NavLink>
+                    <NavLink to="/loans">내 대출</NavLink>
+                    <span>{email}</span>
+                    <button onClick={handleLogout}>로그아웃</button>
+                </nav>
+            )}
+
+            <Routes>
+                {/* 공개 경로 */}
+                <Route path="/login"    element={<LoginPage    showToast={showToast} />} />
+                <Route path="/register" element={<RegisterPage showToast={showToast} />} />
+
+                {/* 보호 경로 — 토큰 없으면 /login으로 이동 */}
+                <Route path="/" element={
+                    <ProtectedRoute><Navigate to="/books" replace /></ProtectedRoute>
+                } />
+                <Route path="/books" element={
+                    <ProtectedRoute><BookListPage showToast={showToast} /></ProtectedRoute>
+                } />
+                <Route path="/loans" element={
+                    <ProtectedRoute><LoanListPage showToast={showToast} /></ProtectedRoute>
+                } />
+            </Routes>
+        </div>
+    );
+}
 ```
+
+> **Redux와의 차이:** `<Provider store={store}>` 래핑이 필요 없습니다.
+> Zustand 스토어는 어디서나 `useBookStore()`, `useLoanStore()` 훅으로 바로 사용합니다.
 
 ## 5. 추가 권장사항
 

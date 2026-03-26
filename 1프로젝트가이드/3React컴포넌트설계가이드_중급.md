@@ -1,5 +1,5 @@
 # React 컴포넌트 설계 가이드
-*ReactJS + Vite + React Router + RTK 환경 최적화*
+*ReactJS + Vite + React Router + Zustand 환경 최적화*
 
 ## 1. React 컴포넌트 설계 원칙
 
@@ -17,7 +17,7 @@
 
 **Container Components (컨테이너 컴포넌트)**
 - 데이터 fetching과 상태 관리를 담당
-- Redux store와 연결
+- Zustand store와 연결
 - 비즈니스 로직 처리
 - Presentational 컴포넌트에 데이터 전달
 
@@ -28,14 +28,14 @@ src/
 │   ├── common/         # 공통 컴포넌트
 │   └── ui/            # 기본 UI 컴포넌트 (Button, Input 등)
 ├── pages/             # 페이지 컴포넌트
-├── containers/        # 컨테이너 컴포넌트
-├── hooks/            # 커스텀 훅
-├── store/            # Redux 스토어
-└── utils/            # 유틸리티 함수
+├── hooks/             # 커스텀 훅
+├── store/             # Zustand 스토어
+├── api/               # API 모듈
+└── utils/             # 유틸리티 함수
 ```
 
 ### 1.4 네이밍 컨벤션
-- **컴포넌트명**: PascalCase 사용 (예: `UserProfile`, `ProductCard`)
+- **컴포넌트명**: PascalCase 사용 (예: `BookCard`, `LoanBadge`)
 - **파일명**: 컴포넌트명과 동일하게 PascalCase
 - **props명**: camelCase 사용
 - **이벤트 핸들러**: `handle` 접두어 사용 (예: `handleClick`, `handleSubmit`)
@@ -47,7 +47,7 @@ src/
 ### 2.1 Props 설계 기본 원칙
 **명확하고 직관적인 이름 사용**
 - props의 목적이 명확히 드러나는 이름을 선택하세요
-- `data` 대신 `user`, `product` 같은 구체적인 이름 사용
+- `data` 대신 `book`, `loan` 같은 구체적인 이름 사용
 
 **Props 개수 최소화**
 - 5개 이하의 props를 권장합니다
@@ -78,36 +78,55 @@ npm install prop-types
 
 ---
 
-## 3. Redux(RTK) 상태 관리 설계 원칙
+## 3. Zustand 상태 관리 설계 원칙
 
 ### 3.1 상태 설계 원칙
-**정규화된 상태 구조**
-- 중첩된 객체보다는 평면적인 구조를 선호
-- ID를 키로 하는 객체 형태로 데이터 저장
-- 배열보다는 객체 사용을 권장
-
 **최소한의 상태 유지**
 - 계산 가능한 값은 상태에 저장하지 않음
 - 컴포넌트 로컬 상태와 글로벌 상태를 명확히 구분
+- 서버 데이터는 캐싱 없이 필요할 때 다시 조회
 
-### 3.2 Slice 설계 가이드
-**기능별 Slice 분리**
-- 각 도메인별로 별도의 slice 생성
-- 사용자, 제품, 주문 등 논리적 단위로 분리
+**도메인별 스토어 분리**
+- 각 도메인별로 별도의 Zustand 스토어 생성
+- bookStore, loanStore, authStore 등 논리적 단위로 분리
+- 스토어 간 직접 의존 금지 — 필요하면 `store.getState()` 사용
 
-**Action과 Reducer 네이밍**
-- Action: 동사형 사용 (예: `fetchUsers`, `updateUser`)
-- Reducer: 현재 시제 사용 (예: `users`, `loading`)
+### 3.2 스토어 설계 가이드
+**상태 + 액션을 한 곳에**
+- Zustand는 상태와 액션을 하나의 스토어에 정의
+- Redux처럼 별도 Action/Reducer 파일이 필요 없음
+
+**비동기 액션 패턴**
+```jsx
+const useBookStore = create((set, get) => ({
+    // 상태
+    books: [],
+    loading: false,
+    error: null,
+
+    // 비동기 액션
+    fetchBooks: async (params) => {
+        set({ loading: true, error: null });
+        try {
+            const result = await fetchBooksApi(params);
+            set({ books: result.content, loading: false });
+        } catch (err) {
+            set({ error: err.message, loading: false });
+            throw err;
+        }
+    }
+}));
+```
 
 ### 3.3 비동기 처리 원칙
-**createAsyncThunk 활용**
-- API 호출은 createAsyncThunk로 처리
-- pending, fulfilled, rejected 상태를 자동으로 관리
-- 에러 처리를 일관성 있게 구현
+**try-catch + set 패턴**
+- 비동기 작업 시작 시 `set({ loading: true })`
+- 성공 시 데이터 업데이트 후 `set({ loading: false })`
+- 실패 시 에러 저장 후 `throw err` (컴포넌트에서 Toast 처리)
 
 **로딩 상태 관리**
-- 각 API 호출별로 로딩 상태 분리
-- 사용자 경험을 위한 적절한 로딩 UI 제공
+- 각 스토어별 `loading` 상태로 로딩 UI 표시
+- 사용자 경험을 위한 적절한 스켈레톤/스피너 제공
 
 ---
 
@@ -115,16 +134,16 @@ npm install prop-types
 
 ### 4.1 API 모듈화 원칙
 **기능별 API 파일 분리**
-- 도메인별로 별도의 API 파일 생성
-- 재사용 가능한 구조로 설계
+- 도메인별로 별도의 API 파일 생성 (`bookApi.js`, `loanApi.js`)
+- 공통 axios 인스턴스는 `axiosInstance.js`에서 관리
 
 **일관된 응답 처리**
 - 성공/실패 응답을 일관되게 처리
 - 에러 메시지를 사용자 친화적으로 변환
 
-### 4.2 createAsyncThunk와 Axios 연동
+### 4.2 Zustand 스토어와 Axios 연동
 **표준화된 API 호출 패턴**
-- 모든 API 호출을 createAsyncThunk로 래핑
+- 스토어 액션 내부에서 API 함수 호출
 - try-catch를 사용한 에러 처리
 - 적절한 에러 메시지 반환
 
@@ -154,56 +173,47 @@ npm install prop-types
 
 ## 6. 코드 예시
 
-### 6.1 Presentational Component (상품 카드)
+### 6.1 Presentational Component (도서 카드)
 
 ```jsx
-// components/ui/ProductCard.jsx
+// components/ui/BookCard.jsx
 import PropTypes from 'prop-types';
-import './ProductCard.css';
 
-const ProductCard = ({ 
-  product, 
-  onAddToCart, 
-  onViewDetail, 
-  isLoading = false 
+const BookCard = ({
+  book,
+  onBorrow,
+  onViewDetail,
+  isLoading = false
 }) => {
-  const handleAddToCart = () => {
-    onAddToCart(product.id);
-  };
-
-  const handleViewDetail = () => {
-    onViewDetail(product.id);
-  };
+  const handleBorrow = () => onBorrow(book.id);
+  const handleViewDetail = () => onViewDetail(book.id);
 
   if (isLoading) {
-    return <div className="product-card loading">Loading...</div>;
+    return <div className="book-card loading">Loading...</div>;
   }
 
+  const available = book.availableCopies > 0;
+
   return (
-    <div className="product-card">
-      <img 
-        src={product.imageUrl} 
-        alt={product.name}
-        className="product-image"
-      />
-      <div className="product-info">
-        <h3 className="product-name">{product.name}</h3>
-        <p className="product-price">${product.price}</p>
-        <p className="product-description">{product.description}</p>
-        
-        <div className="product-actions">
-          <button 
-            onClick={handleViewDetail}
-            className="btn btn-secondary"
-          >
-            자세히 보기
+    <div className="book-card">
+      <div className="book-info">
+        <h3 className="book-title">{book.title}</h3>
+        <p className="book-author">{book.author}</p>
+        <p className="book-publisher">{book.publisher}</p>
+        <span className={`badge ${available ? 'badge-success' : 'badge-error'}`}>
+          {available ? `대출 가능 (${book.availableCopies}권)` : '대출 불가'}
+        </span>
+
+        <div className="book-actions">
+          <button onClick={handleViewDetail} className="btn btn-secondary">
+            상세 보기
           </button>
-          <button 
-            onClick={handleAddToCart}
+          <button
+            onClick={handleBorrow}
             className="btn btn-primary"
-            disabled={!product.inStock}
+            disabled={!available}
           >
-            {product.inStock ? '장바구니 담기' : '품절'}
+            {available ? '대출 신청' : '재고 없음'}
           </button>
         </div>
       </div>
@@ -211,483 +221,340 @@ const ProductCard = ({
   );
 };
 
-ProductCard.propTypes = {
-  product: PropTypes.shape({
-    id: PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
-    name: PropTypes.string.isRequired,
-    price: PropTypes.number.isRequired,
-    description: PropTypes.string,
-    imageUrl: PropTypes.string.isRequired,
-    inStock: PropTypes.bool.isRequired
+BookCard.propTypes = {
+  book: PropTypes.shape({
+    id: PropTypes.number.isRequired,
+    title: PropTypes.string.isRequired,
+    author: PropTypes.string.isRequired,
+    publisher: PropTypes.string,
+    availableCopies: PropTypes.number.isRequired,
   }).isRequired,
-  onAddToCart: PropTypes.func.isRequired,
+  onBorrow: PropTypes.func.isRequired,
   onViewDetail: PropTypes.func.isRequired,
   isLoading: PropTypes.bool
 };
 
-export default ProductCard;
+export default BookCard;
 ```
 
-### 6.2 Redux Slice (상품 관리)
+### 6.2 Zustand 스토어 (도서 관리)
 
 ```jsx
-// store/slices/productSlice.js
-import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
-import { productAPI } from '../api/productAPI';
+// store/bookStore.js
+import { create } from 'zustand';
+import { fetchBooksApi, fetchBookDetailApi } from '../api/bookApi.js';
 
-// 비동기 액션: 상품 목록 조회
-export const fetchProducts = createAsyncThunk(
-  'products/fetchProducts',
-  async (params, { rejectWithValue }) => {
-    try {
-      const response = await productAPI.getProducts(params);
-      return response.data;
-    } catch (error) {
-      return rejectWithValue(
-        error.response?.data?.message || '상품을 불러오는데 실패했습니다.'
-      );
-    }
-  }
-);
+export const useBookStore = create((set) => ({
+    // 상태
+    books: [],
+    totalPages: 0,
+    totalElements: 0,
+    pageNo: 0,
+    selectedBook: null,
+    loading: false,
+    error: null,
 
-// 비동기 액션: 상품 상세 조회
-export const fetchProductDetail = createAsyncThunk(
-  'products/fetchProductDetail',
-  async (productId, { rejectWithValue }) => {
-    try {
-      const response = await productAPI.getProductById(productId);
-      return response.data;
-    } catch (error) {
-      return rejectWithValue(
-        error.response?.data?.message || '상품 정보를 불러오는데 실패했습니다.'
-      );
-    }
-  }
-);
-
-const initialState = {
-  // 상품 목록
-  products: [],
-  totalCount: 0,
-  
-  // 현재 선택된 상품
-  selectedProduct: null,
-  
-  // 로딩 상태
-  loading: {
-    products: false,
-    productDetail: false
-  },
-  
-  // 에러 상태
-  error: {
-    products: null,
-    productDetail: null
-  },
-  
-  // 필터 및 페이지네이션
-  filters: {
-    category: '',
-    minPrice: 0,
-    maxPrice: 1000,
-    searchKeyword: ''
-  },
-  pagination: {
-    page: 1,
-    limit: 12
-  }
-};
-
-const productSlice = createSlice({
-  name: 'products',
-  initialState,
-  reducers: {
-    // 필터 설정
-    setFilters: (state, action) => {
-      state.filters = { ...state.filters, ...action.payload };
-      state.pagination.page = 1; // 필터 변경 시 첫 페이지로 이동
+    // 도서 목록 조회
+    fetchBooks: async ({ keyword = '', category = '', page = 0, size = 10 } = {}) => {
+        set({ loading: true, error: null });
+        try {
+            const result = await fetchBooksApi({ keyword, category, page, size });
+            set({
+                books: result.content,
+                totalPages: result.page.totalPages,
+                totalElements: result.page.totalElements,
+                pageNo: result.page.number,
+                loading: false,
+            });
+        } catch (err) {
+            set({ error: err.message, loading: false });
+            throw err;
+        }
     },
-    
-    // 페이지 변경
-    setPage: (state, action) => {
-      state.pagination.page = action.payload;
-    },
-    
-    // 에러 초기화
-    clearError: (state, action) => {
-      const errorType = action.payload;
-      if (errorType) {
-        state.error[errorType] = null;
-      } else {
-        state.error = { products: null, productDetail: null };
-      }
-    },
-    
-    // 선택된 상품 초기화
-    clearSelectedProduct: (state) => {
-      state.selectedProduct = null;
-      state.error.productDetail = null;
-    }
-  },
-  extraReducers: (builder) => {
-    builder
-      // 상품 목록 조회
-      .addCase(fetchProducts.pending, (state) => {
-        state.loading.products = true;
-        state.error.products = null;
-      })
-      .addCase(fetchProducts.fulfilled, (state, action) => {
-        state.loading.products = false;
-        state.products = action.payload.products;
-        state.totalCount = action.payload.totalCount;
-      })
-      .addCase(fetchProducts.rejected, (state, action) => {
-        state.loading.products = false;
-        state.error.products = action.payload;
-      })
-      
-      // 상품 상세 조회
-      .addCase(fetchProductDetail.pending, (state) => {
-        state.loading.productDetail = true;
-        state.error.productDetail = null;
-      })
-      .addCase(fetchProductDetail.fulfilled, (state, action) => {
-        state.loading.productDetail = false;
-        state.selectedProduct = action.payload;
-      })
-      .addCase(fetchProductDetail.rejected, (state, action) => {
-        state.loading.productDetail = false;
-        state.error.productDetail = action.payload;
-      });
-  }
-});
 
-export const { 
-  setFilters, 
-  setPage, 
-  clearError, 
-  clearSelectedProduct 
-} = productSlice.actions;
+    // 도서 상세 조회
+    fetchBookDetail: async (id) => {
+        set({ loading: true, error: null });
+        try {
+            const book = await fetchBookDetailApi(id);
+            set({ selectedBook: book, loading: false });
+        } catch (err) {
+            set({ error: err.message, loading: false });
+            throw err;
+        }
+    },
 
-export default productSlice.reducer;
+    clearSelectedBook: () => set({ selectedBook: null }),
+}));
 ```
 
 ### 6.3 API 모듈
 
 ```jsx
-// api/productAPI.js
-import axios from 'axios';
+// api/bookApi.js
+import axios from './axiosInstance.js';
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001/api';
-
-const productAPI = {
-  // 상품 목록 조회
-  getProducts: async (params = {}) => {
-    const queryParams = new URLSearchParams();
-    
-    if (params.category) queryParams.append('category', params.category);
-    if (params.minPrice) queryParams.append('minPrice', params.minPrice);
-    if (params.maxPrice) queryParams.append('maxPrice', params.maxPrice);
-    if (params.searchKeyword) queryParams.append('search', params.searchKeyword);
-    if (params.page) queryParams.append('page', params.page);
-    if (params.limit) queryParams.append('limit', params.limit);
-    
-    const url = `${BASE_URL}/products${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
-    return await axios.get(url);
-  },
-  
-  // 상품 상세 조회
-  getProductById: async (productId) => {
-    return await axios.get(`${BASE_URL}/products/${productId}`);
-  },
-  
-  // 상품 생성 (관리자용)
-  createProduct: async (productData) => {
-    return await axios.post(`${BASE_URL}/products`, productData);
-  },
-  
-  // 상품 수정 (관리자용)
-  updateProduct: async (productId, productData) => {
-    return await axios.put(`${BASE_URL}/products/${productId}`, productData);
-  },
-  
-  // 상품 삭제 (관리자용)
-  deleteProduct: async (productId) => {
-    return await axios.delete(`${BASE_URL}/products/${productId}`);
-  }
+// 도서 목록 조회 (검색 + 카테고리 + 페이징)
+export const fetchBooksApi = async ({ keyword = '', category = '', page = 0, size = 10 }) => {
+    const params = new URLSearchParams({ keyword, category, page, size });
+    const { data } = await axios.get(`/api/books?${params}`);
+    return data.data;  // { content, page: { number, totalPages, totalElements } }
 };
 
-export { productAPI };
+// 도서 상세 조회
+export const fetchBookDetailApi = async (id) => {
+    try {
+        const { data } = await axios.get(`/api/books/${id}`);
+        return data.data;
+    } catch (err) {
+        if (err.response?.status === 404) return null;
+        throw err;
+    }
+};
 ```
 
-### 6.4 Container Component (상품 목록 페이지)
-
 ```jsx
-// pages/ProductListPage.jsx
-import { useEffect } from 'react';
-import { useDispatch, useSelector } from 'react-redux';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import ProductCard from '../components/ui/ProductCard';
-import ProductFilter from '../components/ProductFilter';
-import Pagination from '../components/ui/Pagination';
-import LoadingSpinner from '../components/ui/LoadingSpinner';
-import ErrorMessage from '../components/ui/ErrorMessage';
-import { 
-  fetchProducts, 
-  setFilters, 
-  setPage, 
-  clearError 
-} from '../store/slices/productSlice';
+// api/loanApi.js
+import axios from './axiosInstance.js';
 
-const ProductListPage = () => {
-  const dispatch = useDispatch();
-  const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
-  
-  const {
-    products,
-    totalCount,
-    loading,
-    error,
-    filters,
-    pagination
-  } = useSelector(state => state.products);
-
-  // URL 파라미터와 Redux 상태 동기화
-  useEffect(() => {
-    const urlFilters = {
-      category: searchParams.get('category') || '',
-      searchKeyword: searchParams.get('search') || '',
-      minPrice: parseInt(searchParams.get('minPrice')) || 0,
-      maxPrice: parseInt(searchParams.get('maxPrice')) || 1000
-    };
-    
-    const urlPage = parseInt(searchParams.get('page')) || 1;
-    
-    // URL 파라미터가 Redux 상태와 다르면 Redux 상태 업데이트
-    if (JSON.stringify(urlFilters) !== JSON.stringify(filters)) {
-      dispatch(setFilters(urlFilters));
-    }
-    
-    if (urlPage !== pagination.page) {
-      dispatch(setPage(urlPage));
-    }
-  }, [searchParams, dispatch, filters, pagination.page]);
-
-  // 상품 데이터 로드
-  useEffect(() => {
-    const fetchParams = {
-      ...filters,
-      page: pagination.page,
-      limit: pagination.limit
-    };
-    
-    dispatch(fetchProducts(fetchParams));
-  }, [dispatch, filters, pagination]);
-
-  // 필터 변경 핸들러
-  const handleFilterChange = (newFilters) => {
-    dispatch(setFilters(newFilters));
-    
-    // URL 파라미터 업데이트
-    const newSearchParams = new URLSearchParams();
-    Object.entries({ ...filters, ...newFilters }).forEach(([key, value]) => {
-      if (value) {
-        newSearchParams.set(key, value);
-      }
-    });
-    setSearchParams(newSearchParams);
-  };
-
-  // 페이지 변경 핸들러
-  const handlePageChange = (newPage) => {
-    dispatch(setPage(newPage));
-    
-    const newSearchParams = new URLSearchParams(searchParams);
-    newSearchParams.set('page', newPage);
-    setSearchParams(newSearchParams);
-    
-    // 페이지 변경 시 상단으로 스크롤
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  // 장바구니 추가 핸들러
-  const handleAddToCart = (productId) => {
-    // 실제로는 장바구니 관련 액션을 dispatch
-    console.log('장바구니에 추가:', productId);
-    // dispatch(addToCart(productId));
-  };
-
-  // 상품 상세 보기 핸들러
-  const handleViewDetail = (productId) => {
-    navigate(`/products/${productId}`);
-  };
-
-  // 에러 처리 핸들러
-  const handleRetry = () => {
-    dispatch(clearError('products'));
-    dispatch(fetchProducts({
-      ...filters,
-      page: pagination.page,
-      limit: pagination.limit
-    }));
-  };
-
-  // 로딩 상태
-  if (loading.products && products.length === 0) {
-    return <LoadingSpinner message="상품을 불러오는 중..." />;
-  }
-
-  // 에러 상태
-  if (error.products) {
-    return (
-      <ErrorMessage 
-        message={error.products}
-        onRetry={handleRetry}
-      />
-    );
-  }
-
-  return (
-    <div className="product-list-page">
-      <div className="container">
-        <h1 className="page-title">상품 목록</h1>
-        
-        {/* 필터 섹션 */}
-        <ProductFilter 
-          filters={filters}
-          onFilterChange={handleFilterChange}
-        />
-        
-        {/* 상품 개수 정보 */}
-        <div className="product-count">
-          총 {totalCount}개의 상품이 있습니다.
-        </div>
-        
-        {/* 상품 목록 */}
-        <div className="product-grid">
-          {products.map(product => (
-            <ProductCard
-              key={product.id}
-              product={product}
-              onAddToCart={handleAddToCart}
-              onViewDetail={handleViewDetail}
-              isLoading={loading.products}
-            />
-          ))}
-        </div>
-        
-        {/* 상품이 없는 경우 */}
-        {products.length === 0 && !loading.products && (
-          <div className="no-products">
-            <p>조건에 맞는 상품이 없습니다.</p>
-          </div>
-        )}
-        
-        {/* 페이지네이션 */}
-        {totalCount > pagination.limit && (
-          <Pagination
-            currentPage={pagination.page}
-            totalCount={totalCount}
-            pageSize={pagination.limit}
-            onPageChange={handlePageChange}
-          />
-        )}
-      </div>
-    </div>
-  );
+// 내 대출 목록 조회
+export const fetchMyLoansApi = async () => {
+    const { data } = await axios.get('/api/loans/my');
+    return data.data;
 };
 
-export default ProductListPage;
+// 대출 신청
+export const createLoanApi = async (bookId) => {
+    const { data } = await axios.post('/api/loans', { bookId });
+    return data.data;
+};
+
+// 반납 신청
+export const returnBookApi = async (loanId) => {
+    const { data } = await axios.patch(`/api/loans/${loanId}/return`);
+    return data.data;
+};
+```
+
+### 6.4 Container Component (도서 목록 페이지)
+
+```jsx
+// pages/BookListPage.jsx
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useBookStore } from '../store/bookStore.js';
+import { useLoanStore } from '../store/loanStore.js';
+import BookCard from '../components/ui/BookCard.jsx';
+
+const BookListPage = ({ showToast }) => {
+    const navigate = useNavigate();
+    const [keyword, setKeyword] = useState('');
+    const [category, setCategory] = useState('');
+
+    const { books, loading, error, pageNo, totalPages, fetchBooks } = useBookStore();
+    const { createLoan } = useLoanStore();
+
+    // 초기 데이터 로드
+    useEffect(() => {
+        fetchBooks({ page: 0 });
+    }, []);
+
+    // 검색 핸들러
+    const handleSearch = () => {
+        fetchBooks({ keyword, category, page: 0 });
+    };
+
+    // 페이지 변경 핸들러
+    const handlePageChange = (newPage) => {
+        fetchBooks({ keyword, category, page: newPage });
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    // 대출 신청 핸들러
+    const handleBorrow = async (bookId) => {
+        try {
+            await createLoan(bookId);
+            showToast('대출 신청이 완료되었습니다.');
+            fetchBooks({ keyword, category, page: pageNo }); // 재고 갱신
+        } catch (err) {
+            showToast(err.message, true);
+        }
+    };
+
+    // 상세 보기 핸들러
+    const handleViewDetail = (bookId) => {
+        navigate(`/books/${bookId}`);
+    };
+
+    if (loading && books.length === 0) {
+        return <div className="loading">도서를 불러오는 중...</div>;
+    }
+
+    if (error) {
+        return <div className="error">{error}</div>;
+    }
+
+    return (
+        <div className="book-list-page">
+            <h1>도서 목록</h1>
+
+            {/* 검색 필터 */}
+            <div className="search-bar">
+                <input
+                    type="text"
+                    placeholder="제목 또는 저자 검색"
+                    value={keyword}
+                    onChange={e => setKeyword(e.target.value)}
+                />
+                <select value={category} onChange={e => setCategory(e.target.value)}>
+                    <option value="">전체 카테고리</option>
+                    <option value="소설">소설</option>
+                    <option value="IT">IT</option>
+                    <option value="역사">역사</option>
+                    <option value="과학">과학</option>
+                </select>
+                <button onClick={handleSearch}>검색</button>
+            </div>
+
+            {/* 도서 목록 */}
+            <div className="book-grid">
+                {books.map(book => (
+                    <BookCard
+                        key={book.id}
+                        book={book}
+                        onBorrow={handleBorrow}
+                        onViewDetail={handleViewDetail}
+                        isLoading={loading}
+                    />
+                ))}
+            </div>
+
+            {books.length === 0 && !loading && (
+                <div className="no-books">조건에 맞는 도서가 없습니다.</div>
+            )}
+
+            {/* 페이지네이션 */}
+            <div className="pagination">
+                <button disabled={pageNo === 0} onClick={() => handlePageChange(pageNo - 1)}>
+                    이전
+                </button>
+                <span>{pageNo + 1} / {totalPages}</span>
+                <button disabled={pageNo + 1 >= totalPages} onClick={() => handlePageChange(pageNo + 1)}>
+                    다음
+                </button>
+            </div>
+        </div>
+    );
+};
+
+export default BookListPage;
 ```
 
 ### 6.5 라우터 설정
 
 ```jsx
-// App.jsx
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import { Provider } from 'react-redux';
-import { store } from './store/store';
-import Layout from './components/Layout';
-import HomePage from './pages/HomePage';
-import ProductListPage from './pages/ProductListPage';
-import ProductDetailPage from './pages/ProductDetailPage';
-import CartPage from './pages/CartPage';
-import NotFoundPage from './pages/NotFoundPage';
+// App.jsx — Zustand 기반, Provider 불필요
+import { useState } from 'react';
+import { Routes, Route, NavLink, Navigate, useNavigate } from 'react-router-dom';
+import { useAuthStore } from './store/authStore.js';
+
+import Toast          from './components/common/Toast.jsx';
+import BookListPage   from './pages/BookListPage.jsx';
+import BookDetailPage from './pages/BookDetailPage.jsx';
+import LoanListPage   from './pages/LoanListPage.jsx';
+import LoginPage      from './components/auth/LoginPage.jsx';
+import RegisterPage   from './components/auth/RegisterPage.jsx';
+
+function ProtectedRoute({ children }) {
+    const { token } = useAuthStore();
+    if (!token) return <Navigate to="/login" replace />;
+    return children;
+}
 
 function App() {
-  return (
-    <Provider store={store}>
-      <Router>
-        <Routes>
-          <Route path="/" element={<Layout />}>
-            <Route index element={<HomePage />} />
-            <Route path="products" element={<ProductListPage />} />
-            <Route path="products/:productId" element={<ProductDetailPage />} />
-            <Route path="cart" element={<CartPage />} />
-            <Route path="*" element={<NotFoundPage />} />
-          </Route>
-        </Routes>
-      </Router>
-    </Provider>
-  );
+    const [toast, setToast] = useState({ message: '', type: 'success', visible: false });
+    const showToast = (message, isError = false) => {
+        setToast({ message, type: isError ? 'error' : 'success', visible: true });
+        setTimeout(() => setToast(prev => ({ ...prev, visible: false })), 3000);
+    };
+
+    const { token, email, logout } = useAuthStore();
+    const navigate = useNavigate();
+
+    const handleLogout = () => { logout(); navigate('/login'); };
+
+    return (
+        <div>
+            <Toast {...toast} />
+            {token && (
+                <nav>
+                    <NavLink to="/books">도서 목록</NavLink>
+                    <NavLink to="/loans">내 대출</NavLink>
+                    <span>{email}</span>
+                    <button onClick={handleLogout}>로그아웃</button>
+                </nav>
+            )}
+
+            <Routes>
+                <Route path="/login"    element={<LoginPage    showToast={showToast} />} />
+                <Route path="/register" element={<RegisterPage showToast={showToast} />} />
+                <Route path="/" element={
+                    <ProtectedRoute><Navigate to="/books" replace /></ProtectedRoute>
+                } />
+                <Route path="/books" element={
+                    <ProtectedRoute><BookListPage showToast={showToast} /></ProtectedRoute>
+                } />
+                <Route path="/books/:id" element={
+                    <ProtectedRoute><BookDetailPage showToast={showToast} /></ProtectedRoute>
+                } />
+                <Route path="/loans" element={
+                    <ProtectedRoute><LoanListPage showToast={showToast} /></ProtectedRoute>
+                } />
+            </Routes>
+        </div>
+    );
 }
 
 export default App;
 ```
 
+> **Redux와의 차이:** `<Provider store={store}>` 래핑이 필요 없습니다.
+> Zustand 스토어는 어디서나 `useBookStore()`, `useLoanStore()` 훅으로 바로 사용합니다.
+
 ### 6.6 커스텀 훅 예시
 
 ```jsx
-// hooks/useProducts.js
-import { useEffect, useState } from 'react';
-import { useDispatch, useSelector } from 'react-redux';
-import { fetchProducts, setFilters, setPage } from '../store/slices/productSlice';
+// hooks/useBooks.js — 도서 검색 + 페이징 복합 훅
+import { useState, useCallback } from 'react';
+import { useBookStore } from '../store/bookStore.js';
 
-const useProducts = (initialFilters = {}) => {
-  const dispatch = useDispatch();
-  const productState = useSelector(state => state.products);
-  const [isInitialized, setIsInitialized] = useState(false);
+const useBooks = () => {
+    const [keyword, setKeyword] = useState('');
+    const [category, setCategory] = useState('');
 
-  // 초기 필터 설정
-  useEffect(() => {
-    if (!isInitialized && Object.keys(initialFilters).length > 0) {
-      dispatch(setFilters(initialFilters));
-      setIsInitialized(true);
-    }
-  }, [dispatch, initialFilters, isInitialized]);
+    const { books, loading, error, pageNo, totalPages, fetchBooks } = useBookStore();
 
-  // 상품 데이터 로드
-  const loadProducts = (params = {}) => {
-    const fetchParams = {
-      ...productState.filters,
-      ...params,
-      page: productState.pagination.page,
-      limit: productState.pagination.limit
+    // 검색 실행 (항상 첫 페이지부터)
+    const search = useCallback(() => {
+        fetchBooks({ keyword, category, page: 0 });
+    }, [keyword, category, fetchBooks]);
+
+    // 페이지 변경
+    const changePage = useCallback((page) => {
+        fetchBooks({ keyword, category, page });
+    }, [keyword, category, fetchBooks]);
+
+    return {
+        keyword, setKeyword,
+        category, setCategory,
+        books, loading, error,
+        pageNo, totalPages,
+        search,
+        changePage,
     };
-    
-    dispatch(fetchProducts(fetchParams));
-  };
-
-  // 필터 변경
-  const updateFilters = (newFilters) => {
-    dispatch(setFilters(newFilters));
-  };
-
-  // 페이지 변경
-  const changePage = (page) => {
-    dispatch(setPage(page));
-  };
-
-  return {
-    ...productState,
-    loadProducts,
-    updateFilters,
-    changePage
-  };
 };
 
-export default useProducts;
+export default useBooks;
 ```
 
 ---

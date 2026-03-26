@@ -1,6 +1,29 @@
 # Figma 라이브러리 기반 React 화면 설계 가이드
 *체계적인 디자인 시스템 구축을 통한 효율적 개발 워크플로우*
 
+> **이 문서의 위치:** `React화면설계가이드_입문자를위한화면설계시작하기.md`의 **STEP 2(와이어프레임)** 이후,
+> Figma를 도입해 디자인을 더 체계적으로 발전시키고 싶을 때 참고하는 심화 가이드입니다.
+>
+> **프로젝트 예시:** 온라인 도서관 시스템
+> - 도메인: 도서(Book), 대출(Loan), 회원(Member), 카테고리(Category)
+> - 기술 스택: React + React Router + Zustand + Axios + Vite + TailwindCSS
+> - UI 라이브러리: shadcn/ui 또는 MUI (선택)
+>
+> **입문자 가이드와의 연결:**
+> ```
+> 입문자 가이드 7단계            Figma 활용 시점
+> ─────────────────────────────────────────────
+> STEP 1  페이지 목록          → Figma 사이트맵 작성
+> STEP 2  와이어프레임          → Figma 와이어프레임 (이 문서부터 해당)
+> STEP 3  컴포넌트 목록        → Figma Atomic Design 구조
+> STEP 4  디자인 토큰          → Figma Variables / Design Token
+> STEP 5  UI 라이브러리        → Figma 컴포넌트 라이브러리 선택
+> STEP 6  레이아웃 뼈대         → Figma Template → React 코드
+> STEP 7  정적 → 동적 완성     → 코드 구현 단계
+> ```
+
+---
+
 ## 1. Figma 라이브러리 설계 전략
 
 ### 1.1 라이브러리 구조 설계 원칙
@@ -35,6 +58,15 @@
 - **Spacing Tokens**: 4px 기반 일관된 간격 시스템
 - **Border Radius Tokens**: 컴포넌트별 모서리 둥글기 정의
 - **Shadow Tokens**: Elevation 시스템을 위한 그림자 레벨
+
+> **도서관 시스템 디자인 토큰 예시 (입문자 가이드 STEP 4와 연결):**
+> ```
+> Primary  → #3b82f6  (파란색) — 대출 신청 버튼, 링크
+> Success  → #22c55e  (초록색) — 반납 완료, 재고 있음
+> Warning  → #f59e0b  (주황색) — 연체 임박 경고
+> Danger   → #ef4444  (빨간색) — 연체, 재고 없음(대출불가)
+> Neutral  → #64748b  (회색)   — 보조 텍스트, 테두리
+> ```
 
 ### 1.2 컴포넌트 변형(Variants) 설계 전략
 
@@ -211,91 +243,134 @@
 
 ---
 
-## 6. 실제 설계 예시
+## 6. 실제 설계 예시 — 온라인 도서관 시스템
 
-### 6.1 E-commerce 제품 목록 페이지 설계
+### 6.1 도서 목록 페이지 (BookSection) 설계
+
+**Atomic Design으로 페이지 구조 분석**
+```
+Header (Organism)
+├── Logo (Atom)                      ← "📚 도서관" 텍스트 + 아이콘
+├── Navigation (Molecule)            ← "도서 목록" | "내 대출 이력" 탭
+└── UserMenu (Molecule)              ← 로그인 시: 이메일 + 로그아웃 버튼
+                                        비로그인 시: 로그인 버튼
+
+BookSearch (Organism)
+├── SearchInput (Molecule)           ← 텍스트 입력 + 검색 아이콘
+│   ├── Input (Atom)
+│   └── IconButton (Atom)
+└── CategoryFilter (Molecule)        ← 카테고리 드롭다운
+    ├── Select (Atom)
+    └── Label (Atom)
+
+BookList (Organism)
+├── BookListRow (Molecule) × N       ← 도서 한 행 (반복)
+│   ├── BookTitle (Atom)             ← 제목 (bold)
+│   ├── BookAuthor (Atom)            ← 저자
+│   ├── CategoryBadge (Atom)         ← 카테고리 태그
+│   ├── StockBadge (Atom)            ← 재고 수량 (0이면 빨간색)
+│   └── LoanButton (Atom)            ← [대출 신청] 버튼 (재고 0이면 비활성)
+└── EmptyState (Molecule)            ← 검색 결과 없을 때 안내 메시지
+
+Pagination (Molecule)
+├── PrevButton (Atom)
+├── PageNumbers (Atom) × N
+└── NextButton (Atom)
+
+LoanModal (Organism)                 ← 대출 신청 클릭 시 표시
+├── ModalOverlay (Atom)
+├── ModalHeader (Molecule)           ← "대출 신청" + 닫기 버튼
+├── BookInfo (Molecule)              ← 도서 제목/저자 (읽기 전용)
+├── LoanPeriodInfo (Molecule)        ← "대출 기간: 14일, 반납 예정일: ..."
+└── ModalActions (Molecule)          ← [취소] [대출 신청] 버튼
+```
+
+**컴포넌트 변형(Variants) 정의**
+- **LoanButton Variants**
+  - State: Available (파란색), Unavailable (회색·비활성)
+- **StockBadge Variants**
+  - stock > 0: 초록색 숫자
+  - stock == 0: 빨간색 + "대출 불가" 텍스트
+- **CategoryBadge Variants**
+  - 소설 / IT / 역사 / 기타 — 카테고리별 색상 구분
+
+### 6.2 내 대출 이력 페이지 (MyLoanPage) 설계
 
 **페이지 구조 분석**
 ```
-Header (Organism)
-├── Logo (Atom)
-├── Navigation (Molecule)
-├── Search Bar (Molecule)
-└── User Menu (Molecule)
+Header (Organism)                    ← BookSection과 동일 Header
 
-Filter Sidebar (Organism)
-├── Category Filter (Molecule)
-├── Price Range (Molecule)
-└── Brand Filter (Molecule)
+MyLoanList (Organism)
+├── LoanStatusTabs (Molecule)        ← "전체" | "대출중" | "반납완료" 탭
+├── LoanRow (Molecule) × N           ← 대출 한 행 (반복)
+│   ├── BookTitle (Atom)
+│   ├── LoanDateRange (Molecule)     ← "2026-03-26 ~ 2026-04-09"
+│   ├── StatusBadge (Atom)           ← 대출중(파란색) / 연체(빨간색) / 반납완료(회색)
+│   └── ReturnButton (Atom)          ← [반납] 버튼 (대출중일 때만 표시)
+└── EmptyState (Molecule)            ← 대출 이력 없을 때 안내
 
-Product Grid (Organism)
-├── Product Card (Molecule) × N
-│   ├── Product Image (Atom)
-│   ├── Product Info (Molecule)
-│   └── Action Buttons (Molecule)
-└── Pagination (Molecule)
-
-Footer (Organism)
+Pagination (Molecule)                ← BookSection과 동일 컴포넌트 재사용
 ```
 
-**컴포넌트 변형 정의**
-- **Product Card Variants**
-  - Size: Compact, Standard, Detailed
-  - State: Default, Hover, Wishlist, Out of Stock
-  - Layout: Grid View, List View
-
-### 6.2 대시보드 페이지 설계
-
-**레이아웃 패턴**
+**StatusBadge Variants (상태 배지)**
 ```
-App Shell (Template)
-├── Top Bar (Organism)
-├── Side Navigation (Organism)
-├── Main Content (Template)
-│   ├── Stats Cards (Organism)
-│   ├── Charts Section (Organism)
-│   └── Data Table (Organism)
-└── Notification Panel (Organism)
+ACTIVE   → "대출중"   파란색 배경
+OVERDUE  → "연체"     빨간색 배경 (반납 예정일 초과)
+RETURNED → "반납완료" 회색 배경
 ```
+
+### 6.3 레이아웃 템플릿 — App Shell 패턴
 
 **반응형 적응 전략**
-- **Desktop (1024px+)**: 사이드바 + 메인 콘텐츠
-- **Tablet (768px-1023px)**: 접을 수 있는 사이드바
-- **Mobile (~767px)**: 하단 탭 네비게이션
+- **Desktop (1024px+)**: 상단 Header + 메인 콘텐츠 (테이블 뷰)
+- **Tablet (768px-1023px)**: Header 유지, 테이블 가로 스크롤
+- **Mobile (~767px)**: 카드 형태로 전환 (테이블 → 카드 뷰)
+
+```
+App Shell (Template)
+├── Header (Organism)                ← 고정 상단
+└── Main Content (Template)
+    └── Routes
+        ├── /books  → BookSection
+        └── /loans  → MyLoanPage     (로그인 필요)
+```
 
 ---
 
 ## 7. 실제 코드 구현 예시
 
-### 7.1 Design Token 시스템 구현
+### 7.1 Design Token 시스템 구현 — 도서관 시스템
 
 ```javascript
-// tokens/colors.js - Figma Variables에서 추출
+// tokens/colors.js - Figma Variables에서 추출 (도서관 시스템)
 export const colors = {
-  // Primary Palette
+  // Primary Palette — 대출 신청 버튼, 링크, 강조 색상
   primary: {
-    50: '#f0f9ff',
-    100: '#e0f2fe',
-    500: '#0ea5e9',  // Main brand color
-    600: '#0284c7',  // Hover state
-    700: '#0369a1',  // Active state
-    900: '#0c4a6e',  // Text on light bg
+    50: '#eff6ff',
+    100: '#dbeafe',
+    500: '#3b82f6',  // Main brand color (Tailwind blue-500)
+    600: '#2563eb',  // Hover state
+    700: '#1d4ed8',  // Active state
+    900: '#1e3a8a',  // Text on light bg
   },
-  
-  // Semantic Colors
+
+  // Semantic Colors — 도서관 상태 표현
   semantic: {
-    success: '#10b981',
-    warning: '#f59e0b', 
-    error: '#ef4444',
-    info: '#3b82f6',
+    success: '#22c55e',   // 반납 완료, 재고 있음 (green-500)
+    warning: '#f59e0b',   // 연체 임박, 주의 (amber-500)
+    error:   '#ef4444',   // 연체, 재고 없음(대출 불가) (red-500)
+    info:    '#3b82f6',   // 대출중 상태 (blue-500)
   },
-  
-  // Neutral Palette
+
+  // Neutral Palette — 텍스트, 배경, 테두리
   neutral: {
-    0: '#ffffff',
-    50: '#f8fafc',
+    0:   '#ffffff',
+    50:  '#f8fafc',
     100: '#f1f5f9',
+    200: '#e2e8f0',
+    400: '#94a3b8',
     500: '#64748b',
+    700: '#334155',
     900: '#0f172a',
   }
 };
@@ -596,266 +671,221 @@ FormField.propTypes = {
 export default FormField;
 ```
 
-### 7.4 Organism 컴포넌트 - Product Card
+### 7.4 Organism 컴포넌트 - BookListRow (도서 목록 행)
+
+도서관 시스템의 도서 한 행을 표현하는 Molecule/Organism 컴포넌트입니다.
+Figma의 `BookListRow` 컴포넌트가 이 코드로 1:1 매핑됩니다.
 
 ```jsx
-// components/organisms/ProductCard/ProductCard.jsx
+// components/organisms/BookListRow/BookListRow.jsx
 import React from 'react';
 import PropTypes from 'prop-types';
 import Button from '../../atoms/Button/Button';
 import { colors, spacing } from '../../../tokens';
-import { HeartIcon, StarIcon, ShoppingCartIcon } from '../../../icons';
 
-const ProductCard = ({
-  product,
-  variant = 'standard',
-  onAddToCart,
-  onToggleWishlist,
-  onViewDetails,
-  isWishlisted = false,
-  layout = 'grid', // grid, list
+// StockBadge — Atom: 재고 수량 표시 (0이면 빨간색)
+const StockBadge = ({ stock }) => (
+  <span style={{
+    fontWeight: stock === 0 ? '700' : '400',
+    color: stock === 0 ? colors.semantic.error : colors.neutral[700],
+    fontSize: '0.875rem',
+  }}>
+    {stock === 0 ? '없음' : stock}
+  </span>
+);
+
+// CategoryBadge — Atom: 카테고리 태그
+const CategoryBadge = ({ name }) => (
+  <span style={{
+    display: 'inline-block',
+    padding: `${spacing[1]} ${spacing[2]}`,
+    borderRadius: '9999px',
+    fontSize: '0.75rem',
+    fontWeight: '500',
+    backgroundColor: colors.primary[50],
+    color: colors.primary[700],
+    border: `1px solid ${colors.primary[100]}`,
+  }}>
+    {name}
+  </span>
+);
+
+// BookListRow — Molecule: 도서 목록 한 행
+const BookListRow = ({
+  book,
+  onLoan,
 }) => {
-  const getCardStyles = () => ({
-    backgroundColor: colors.neutral[0],
-    borderRadius: '0.75rem',
-    border: `1px solid ${colors.neutral[200]}`,
-    overflow: 'hidden',
-    transition: 'all 0.2s ease-in-out',
-    cursor: 'pointer',
+  const getCellStyles = (flex = 1) => ({
+    flex,
+    padding: `${spacing[3]} ${spacing[4]}`,
     display: 'flex',
-    flexDirection: layout === 'grid' ? 'column' : 'row',
+    alignItems: 'center',
+  });
+
+  const getRowStyles = () => ({
+    display: 'flex',
+    borderBottom: `1px solid ${colors.neutral[200]}`,
+    transition: 'background-color 0.15s',
     '&:hover': {
-      boxShadow: '0 10px 25px rgba(0, 0, 0, 0.1)',
-      transform: 'translateY(-2px)',
+      backgroundColor: colors.neutral[50],
     },
   });
 
-  const getImageContainerStyles = () => ({
-    position: 'relative',
-    width: layout === 'grid' ? '100%' : '200px',
-    height: layout === 'grid' ? '200px' : '150px',
-    backgroundColor: colors.neutral[50],
-    overflow: 'hidden',
-  });
-
-  const getContentStyles = () => ({
-    padding: spacing[4],
-    display: 'flex',
-    flexDirection: 'column',
-    gap: spacing[3],
-    flex: 1,
-  });
-
-  const getPriceStyles = () => ({
-    display: 'flex',
-    alignItems: 'center',
-    gap: spacing[2],
-  });
-
-  const formatPrice = (price) => {
-    return new Intl.NumberFormat('ko-KR', {
-      style: 'currency',
-      currency: 'KRW',
-    }).format(price);
-  };
-
-  const renderRating = (rating, reviewCount) => (
-    <div style={{ display: 'flex', alignItems: 'center', gap: spacing[1] }}>
-      <div style={{ display: 'flex', gap: spacing[0.5] }}>
-        {[...Array(5)].map((_, index) => (
-          <StarIcon
-            key={index}
-            size={14}
-            color={index < rating ? colors.semantic.warning : colors.neutral[300]}
-            filled={index < rating}
-          />
-        ))}
+  return (
+    <div style={getRowStyles()}>
+      {/* 제목 */}
+      <div style={{ ...getCellStyles(3), fontWeight: '600', color: colors.neutral[900] }}>
+        {book.title}
       </div>
-      <span style={{ 
-        fontSize: '0.875rem', 
-        color: colors.neutral[500],
-        marginLeft: spacing[1]
-      }}>
-        ({reviewCount})
-      </span>
+
+      {/* 저자 */}
+      <div style={{ ...getCellStyles(2), color: colors.neutral[700] }}>
+        {book.author}
+      </div>
+
+      {/* 카테고리 */}
+      <div style={getCellStyles(1.5)}>
+        <CategoryBadge name={book.categoryName} />
+      </div>
+
+      {/* 재고 */}
+      <div style={{ ...getCellStyles(1), justifyContent: 'center' }}>
+        <StockBadge stock={book.stock} />
+      </div>
+
+      {/* 대출 버튼 */}
+      <div style={{ ...getCellStyles(1.5), justifyContent: 'center' }}>
+        {book.stock > 0 ? (
+          <Button
+            variant="primary"
+            size="small"
+            onClick={() => onLoan(book)}
+          >
+            대출 신청
+          </Button>
+        ) : (
+          <span style={{ fontSize: '0.875rem', color: colors.neutral[400] }}>
+            대출 불가
+          </span>
+        )}
+      </div>
     </div>
   );
+};
+
+BookListRow.propTypes = {
+  book: PropTypes.shape({
+    id: PropTypes.number.isRequired,
+    title: PropTypes.string.isRequired,
+    author: PropTypes.string.isRequired,
+    categoryName: PropTypes.string.isRequired,
+    stock: PropTypes.number.isRequired,
+  }).isRequired,
+  onLoan: PropTypes.func.isRequired,
+};
+
+export default BookListRow;
+```
+
+**LoanModal — Organism: 대출 신청 모달**
+
+```jsx
+// components/organisms/LoanModal/LoanModal.jsx
+import React from 'react';
+import PropTypes from 'prop-types';
+import Button from '../../atoms/Button/Button';
+import { colors, spacing } from '../../../tokens';
+
+const LoanModal = ({ book, onConfirm, onClose }) => {
+  if (!book) return null;
+
+  // 반납 예정일 계산 (오늘 + 14일)
+  const dueDate = new Date();
+  dueDate.setDate(dueDate.getDate() + 14);
+  const dueDateStr = dueDate.toLocaleDateString('ko-KR', {
+    year: 'numeric', month: '2-digit', day: '2-digit'
+  });
+
+  const overlayStyles = {
+    position: 'fixed', inset: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    zIndex: 1000,
+  };
+
+  const modalStyles = {
+    backgroundColor: colors.neutral[0],
+    borderRadius: '0.75rem',
+    padding: spacing[6],
+    width: '400px',
+    maxWidth: '90vw',
+    boxShadow: '0 20px 40px rgba(0, 0, 0, 0.15)',
+  };
 
   return (
-    <article style={getCardStyles()} onClick={onViewDetails}>
-      {/* 상품 이미지 영역 */}
-      <div style={getImageContainerStyles()}>
-        <img
-          src={product.imageUrl}
-          alt={product.name}
-          style={{
-            width: '100%',
-            height: '100%',
-            objectFit: 'cover',
-          }}
-          loading="lazy"
-        />
-        
-        {/* 할인 배지 */}
-        {product.discountPercentage > 0 && (
-          <div style={{
-            position: 'absolute',
-            top: spacing[2],
-            left: spacing[2],
-            backgroundColor: colors.semantic.error,
-            color: colors.neutral[0],
-            padding: `${spacing[1]} ${spacing[2]}`,
-            borderRadius: '0.25rem',
-            fontSize: '0.75rem',
-            fontWeight: '600',
-          }}>
-            -{product.discountPercentage}%
+    <div style={overlayStyles} onClick={onClose}>
+      <div style={modalStyles} onClick={e => e.stopPropagation()}>
+        {/* 헤더 */}
+        <h2 style={{ margin: 0, marginBottom: spacing[4], fontSize: '1.25rem', fontWeight: '700' }}>
+          대출 신청
+        </h2>
+
+        {/* 도서 정보 (읽기 전용) */}
+        <div style={{
+          backgroundColor: colors.neutral[50],
+          borderRadius: '0.5rem',
+          padding: spacing[4],
+          marginBottom: spacing[4],
+        }}>
+          <div style={{ marginBottom: spacing[2] }}>
+            <span style={{ fontSize: '0.75rem', color: colors.neutral[500] }}>제목</span>
+            <p style={{ margin: 0, fontWeight: '600', color: colors.neutral[900] }}>{book.title}</p>
           </div>
-        )}
-        
-        {/* 위시리스트 버튼 */}
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggleWishlist(product.id);
-          }}
-          style={{
-            position: 'absolute',
-            top: spacing[2],
-            right: spacing[2],
-            backgroundColor: colors.neutral[0],
-            border: 'none',
-            borderRadius: '50%',
-            width: '32px',
-            height: '32px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'pointer',
-            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
-          }}
-          aria-label={isWishlisted ? '위시리스트에서 제거' : '위시리스트에 추가'}
-        >
-          <HeartIcon
-            size={16}
-            color={isWishlisted ? colors.semantic.error : colors.neutral[400]}
-            filled={isWishlisted}
-          />
-        </button>
-      </div>
+          <div>
+            <span style={{ fontSize: '0.75rem', color: colors.neutral[500] }}>저자</span>
+            <p style={{ margin: 0, color: colors.neutral[700] }}>{book.author}</p>
+          </div>
+        </div>
 
-      {/* 상품 정보 영역 */}
-      <div style={getContentStyles()}>
-        {/* 브랜드명 */}
+        {/* 대출 기간 안내 */}
         <div style={{
+          borderLeft: `3px solid ${colors.primary[500]}`,
+          paddingLeft: spacing[3],
+          marginBottom: spacing[6],
+          color: colors.neutral[700],
           fontSize: '0.875rem',
-          color: colors.neutral[500],
-          fontWeight: '500',
         }}>
-          {product.brand}
-        </div>
-
-        {/* 상품명 */}
-        <h3 style={{
-          margin: 0,
-          fontSize: layout === 'grid' ? '1rem' : '1.125rem',
-          fontWeight: '600',
-          color: colors.neutral[900],
-          lineHeight: '1.4',
-          display: '-webkit-box',
-          WebkitLineClamp: 2,
-          WebkitBoxOrient: 'vertical',
-          overflow: 'hidden',
-        }}>
-          {product.name}
-        </h3>
-
-        {/* 평점 */}
-        {product.rating > 0 && renderRating(product.rating, product.reviewCount)}
-
-        {/* 가격 */}
-        <div style={getPriceStyles()}>
-          {product.originalPrice && product.originalPrice > product.price && (
-            <span style={{
-              fontSize: '0.875rem',
-              color: colors.neutral[400],
-              textDecoration: 'line-through',
-            }}>
-              {formatPrice(product.originalPrice)}
-            </span>
-          )}
-          <span style={{
-            fontSize: layout === 'grid' ? '1.125rem' : '1.25rem',
-            fontWeight: '700',
-            color: colors.neutral[900],
-          }}>
-            {formatPrice(product.price)}
-          </span>
-        </div>
-
-        {/* 재고 상태 */}
-        <div style={{
-          padding: `${spacing[1]} ${spacing[2]}`,
-          borderRadius: '0.25rem',
-          fontSize: '0.75rem',
-          fontWeight: '600',
-          alignSelf: 'flex-start',
-          backgroundColor: product.inStock 
-            ? `${colors.semantic.success}15` 
-            : `${colors.semantic.error}15`,
-          color: product.inStock 
-            ? colors.semantic.success 
-            : colors.semantic.error,
-        }}>
-          {product.inStock ? '재고 있음' : '품절'}
+          <p style={{ margin: 0 }}>대출 기간: <strong>14일</strong></p>
+          <p style={{ margin: 0, marginTop: spacing[1] }}>
+            반납 예정일: <strong>{dueDateStr}</strong>
+          </p>
         </div>
 
         {/* 액션 버튼 */}
-        <div style={{
-          marginTop: 'auto',
-          paddingTop: spacing[2],
-        }}>
-          <Button
-            variant="primary"
-            size={layout === 'grid' ? 'medium' : 'large'}
-            fullWidth={layout === 'grid'}
-            disabled={!product.inStock}
-            icon={<ShoppingCartIcon size={16} />}
-            onClick={(e) => {
-              e.stopPropagation();
-              onAddToCart(product);
-            }}
-          >
-            {product.inStock ? '장바구니 담기' : '품절'}
+        <div style={{ display: 'flex', gap: spacing[3], justifyContent: 'flex-end' }}>
+          <Button variant="secondary" size="medium" onClick={onClose}>
+            취소
+          </Button>
+          <Button variant="primary" size="medium" onClick={() => onConfirm(book.id)}>
+            대출 신청
           </Button>
         </div>
       </div>
-    </article>
+    </div>
   );
 };
 
-ProductCard.propTypes = {
-  product: PropTypes.shape({
-    id: PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
-    name: PropTypes.string.isRequired,
-    brand: PropTypes.string.isRequired,
-    price: PropTypes.number.isRequired,
-    originalPrice: PropTypes.number,
-    discountPercentage: PropTypes.number,
-    imageUrl: PropTypes.string.isRequired,
-    rating: PropTypes.number,
-    reviewCount: PropTypes.number,
-    inStock: PropTypes.bool.isRequired,
-  }).isRequired,
-  variant: PropTypes.oneOf(['compact', 'standard', 'detailed']),
-  onAddToCart: PropTypes.func.isRequired,
-  onToggleWishlist: PropTypes.func.isRequired,
-  onViewDetails: PropTypes.func.isRequired,
-  isWishlisted: PropTypes.bool,
-  layout: PropTypes.oneOf(['grid', 'list']),
+LoanModal.propTypes = {
+  book: PropTypes.shape({
+    id: PropTypes.number.isRequired,
+    title: PropTypes.string.isRequired,
+    author: PropTypes.string.isRequired,
+  }),
+  onConfirm: PropTypes.func.isRequired,
+  onClose: PropTypes.func.isRequired,
 };
 
-export default ProductCard;
+export default LoanModal;
 ```
 
 ### 7.5 Template 컴포넌트 - Page Layout
@@ -1052,129 +1082,109 @@ GridItem.propTypes = {
 export { Grid, GridItem };
 ```
 
-### 7.7 실제 페이지 구현 - 제품 목록 페이지
+### 7.7 실제 페이지 구현 - 도서 목록 페이지
+
+> **입문자를위한화면설계시작하기 STEP 7** 연결 — 정적 더미 데이터 → Zustand 스토어 → 실제 API 순으로 단계적으로 발전시키는 예시입니다.
 
 ```jsx
-// pages/ProductListPage/ProductListPage.jsx
-import React, { useState, useEffect, useMemo } from 'react';
+// pages/BookListPage/BookListPage.jsx
+import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import PageLayout from '../../components/templates/PageLayout/PageLayout';
-import ProductCard from '../../components/organisms/ProductCard/ProductCard';
-import { Grid } from '../../components/layout/Grid/Grid';
+import BookListRow from '../../components/organisms/BookListRow/BookListRow';
+import LoanModal from '../../components/organisms/LoanModal/LoanModal';
 import Button from '../../components/atoms/Button/Button';
 import FormField from '../../components/molecules/FormField/FormField';
 import { colors, spacing } from '../../tokens';
-import { 
-  FilterIcon, 
-  GridIcon, 
-  ListIcon, 
-  SearchIcon 
-} from '../../icons';
+import { useBookStore } from '../../store/bookStore';
+import { useAuthStore } from '../../store/authStore';
 
-const ProductListPage = () => {
+// ── STEP 7-1: 정적 더미 데이터 ────────────────────────────────────────────
+// 처음에는 아래 DUMMY_BOOKS만 사용해서 레이아웃이 맞는지 확인합니다.
+const DUMMY_BOOKS = [
+  { id: 1, title: '채식주의자',  author: '한강',   categoryName: '소설', stock: 3 },
+  { id: 2, title: '클린코드',    author: '마틴',   categoryName: 'IT',   stock: 0 },
+  { id: 3, title: '사피엔스',    author: '하라리', categoryName: '역사', stock: 2 },
+  { id: 4, title: '토비의 스프링', author: '이일민', categoryName: 'IT', stock: 1 },
+];
+
+const CATEGORIES = ['전체', '소설', 'IT', '역사', '기타'];
+
+const BookListPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
-  const [products, setProducts] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [layout, setLayout] = useState('grid');
-  const [filters, setFilters] = useState({
-    category: searchParams.get('category') || '',
-    priceRange: searchParams.get('priceRange') || '',
-    brand: searchParams.get('brand') || '',
-    search: searchParams.get('search') || '',
-  });
 
-  // 상품 데이터 로딩 (실제로는 API 호출)
+  // ── STEP 7-2: Zustand 스토어 연결 ─────────────────────────────────────
+  // DUMMY_BOOKS 대신 스토어의 books를 사용합니다.
+  const { books, loading, pageNo, totalPages, fetchBooks } = useBookStore();
+  const { token } = useAuthStore();
+
+  // 로컬 상태 (검색 조건 · 모달)
+  const [searchKeyword, setSearchKeyword] = useState(
+    searchParams.get('keyword') || ''
+  );
+  const [selectedCategory, setSelectedCategory] = useState(
+    searchParams.get('category') || '전체'
+  );
+  const [selectedBook, setSelectedBook] = useState(null);   // 대출 모달 대상
+  const [isLoanModalOpen, setIsLoanModalOpen] = useState(false);
+
+  // ── STEP 7-3: 실제 API 호출 ────────────────────────────────────────────
+  // fetchBooks()가 내부적으로 bookApi.getAll()을 호출합니다.
   useEffect(() => {
-    const loadProducts = async () => {
-      setLoading(true);
-      try {
-        // API 호출 시뮬레이션
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        // 더미 데이터
-        const mockProducts = Array.from({ length: 12 }, (_, index) => ({
-          id: index + 1,
-          name: `상품 ${index + 1}`,
-          brand: '브랜드명',
-          price: Math.floor(Math.random() * 100000) + 10000,
-          originalPrice: Math.floor(Math.random() * 120000) + 50000,
-          discountPercentage: Math.floor(Math.random() * 30),
-          imageUrl: `https://picsum.photos/300/300?random=${index}`,
-          rating: Math.floor(Math.random() * 5) + 1,
-          reviewCount: Math.floor(Math.random() * 1000),
-          inStock: Math.random() > 0.2,
-        }));
-        
-        setProducts(mockProducts);
-      } catch (error) {
-        console.error('상품 로딩 실패:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadProducts();
-  }, [filters]);
-
-  // 필터링된 상품 목록
-  const filteredProducts = useMemo(() => {
-    return products.filter(product => {
-      if (filters.search && !product.name.toLowerCase().includes(filters.search.toLowerCase())) {
-        return false;
-      }
-      // 추가 필터 로직...
-      return true;
+    fetchBooks({
+      keyword: searchKeyword,
+      category: selectedCategory === '전체' ? '' : selectedCategory,
+      page: 0,
     });
-  }, [products, filters]);
+  }, [searchKeyword, selectedCategory]);
 
-  // 필터 변경 핸들러
-  const handleFilterChange = (key, value) => {
-    const newFilters = { ...filters, [key]: value };
-    setFilters(newFilters);
-    
-    // URL 업데이트
-    const newSearchParams = new URLSearchParams();
-    Object.entries(newFilters).forEach(([k, v]) => {
-      if (v) newSearchParams.set(k, v);
-    });
-    setSearchParams(newSearchParams);
+  // URL 동기화 (검색 조건을 브라우저 주소창에 반영)
+  const updateSearchParams = (keyword, category) => {
+    const params = {};
+    if (keyword)              params.keyword  = keyword;
+    if (category !== '전체') params.category = category;
+    setSearchParams(params);
   };
 
-  // 상품 액션 핸들러들
-  const handleAddToCart = (product) => {
-    console.log('장바구니 추가:', product);
-    // 실제로는 카트 상태 업데이트
+  const handleKeywordChange = (value) => {
+    setSearchKeyword(value);
+    updateSearchParams(value, selectedCategory);
   };
 
-  const handleToggleWishlist = (productId) => {
-    console.log('위시리스트 토글:', productId);
-    // 실제로는 위시리스트 상태 업데이트
+  const handleCategoryChange = (value) => {
+    setSelectedCategory(value);
+    updateSearchParams(searchKeyword, value);
   };
 
-  const handleViewDetails = (product) => {
-    console.log('상품 상세 보기:', product);
-    // 실제로는 상품 상세 페이지로 이동
+  // 대출 신청 버튼 → 로그인 여부 확인 후 모달 오픈
+  const handleLoanRequest = (book) => {
+    if (!token) {
+      alert('로그인이 필요한 서비스입니다.');
+      return;
+    }
+    setSelectedBook(book);
+    setIsLoanModalOpen(true);
   };
 
-  // 사이드바 콘텐츠
+  // 사이드바: 검색 + 카테고리 필터
   const sidebarContent = (
     <div style={{ padding: spacing[6] }}>
-      <h3 style={{ 
+      <h3 style={{
         margin: `0 0 ${spacing[6]} 0`,
         fontSize: '1.25rem',
         fontWeight: '600',
         color: colors.neutral[900],
       }}>
-        필터
+        도서 검색
       </h3>
 
-      {/* 검색 */}
-      <FormField label="상품 검색">
+      {/* 제목 / 저자 검색 */}
+      <FormField label="제목 · 저자 검색">
         <input
           type="text"
-          placeholder="상품명을 입력하세요"
-          value={filters.search}
-          onChange={(e) => handleFilterChange('search', e.target.value)}
+          placeholder="검색어를 입력하세요"
+          value={searchKeyword}
+          onChange={(e) => handleKeywordChange(e.target.value)}
           style={{
             width: '100%',
             padding: `${spacing[3]} ${spacing[4]}`,
@@ -1188,8 +1198,8 @@ const ProductListPage = () => {
       {/* 카테고리 필터 */}
       <FormField label="카테고리">
         <select
-          value={filters.category}
-          onChange={(e) => handleFilterChange('category', e.target.value)}
+          value={selectedCategory}
+          onChange={(e) => handleCategoryChange(e.target.value)}
           style={{
             width: '100%',
             padding: `${spacing[3]} ${spacing[4]}`,
@@ -1198,30 +1208,9 @@ const ProductListPage = () => {
             fontSize: '1rem',
           }}
         >
-          <option value="">전체</option>
-          <option value="electronics">전자제품</option>
-          <option value="clothing">의류</option>
-          <option value="books">도서</option>
-        </select>
-      </FormField>
-
-      {/* 가격 범위 */}
-      <FormField label="가격 범위">
-        <select
-          value={filters.priceRange}
-          onChange={(e) => handleFilterChange('priceRange', e.target.value)}
-          style={{
-            width: '100%',
-            padding: `${spacing[3]} ${spacing[4]}`,
-            border: `1px solid ${colors.neutral[300]}`,
-            borderRadius: '0.5rem',
-            fontSize: '1rem',
-          }}
-        >
-          <option value="">전체</option>
-          <option value="0-50000">5만원 이하</option>
-          <option value="50000-100000">5-10만원</option>
-          <option value="100000+">10만원 이상</option>
+          {CATEGORIES.map(cat => (
+            <option key={cat} value={cat}>{cat}</option>
+          ))}
         </select>
       </FormField>
 
@@ -1230,7 +1219,8 @@ const ProductListPage = () => {
         variant="outline"
         fullWidth
         onClick={() => {
-          setFilters({ category: '', priceRange: '', brand: '', search: '' });
+          setSearchKeyword('');
+          setSelectedCategory('전체');
           setSearchParams({});
         }}
         style={{ marginTop: spacing[4] }}
@@ -1240,7 +1230,7 @@ const ProductListPage = () => {
     </div>
   );
 
-  // 메인 콘텐츠
+  // 메인 콘텐츠: 도서 목록 테이블
   const mainContent = (
     <div>
       {/* 페이지 헤더 */}
@@ -1248,127 +1238,151 @@ const ProductListPage = () => {
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: spacing[8],
-        flexWrap: 'wrap',
-        gap: spacing[4],
+        marginBottom: spacing[6],
       }}>
-        <div>
-          <h1 style={{
-            margin: 0,
-            fontSize: '2rem',
-            fontWeight: '700',
-            color: colors.neutral[900],
-            marginBottom: spacing[2],
-          }}>
-            전체 상품
-          </h1>
-          <p style={{
-            margin: 0,
-            color: colors.neutral[600],
-            fontSize: '1.125rem',
-          }}>
-            {filteredProducts.length}개의 상품을 찾았습니다
-          </p>
-        </div>
-
-        {/* 레이아웃 토글 */}
-        <div style={{
-          display: 'flex',
-          gap: spacing[2],
-          padding: spacing[1],
-          backgroundColor: colors.neutral[100],
-          borderRadius: '0.5rem',
+        <h1 style={{
+          margin: 0,
+          fontSize: '1.75rem',
+          fontWeight: '700',
+          color: colors.neutral[900],
         }}>
-          <Button
-            variant={layout === 'grid' ? 'primary' : 'ghost'}
-            size="small"
-            icon={<GridIcon size={16} />}
-            onClick={() => setLayout('grid')}
-          >
-            격자
-          </Button>
-          <Button
-            variant={layout === 'list' ? 'primary' : 'ghost'}
-            size="small"
-            icon={<ListIcon size={16} />}
-            onClick={() => setLayout('list')}
-          >
-            목록
-          </Button>
-        </div>
+          도서 목록
+        </h1>
+        <p style={{ margin: 0, color: colors.neutral[500] }}>
+          {books.length}권
+        </p>
       </div>
 
-      {/* 상품 목록 */}
+      {/* 도서 테이블 */}
       {loading ? (
         <div style={{
           display: 'flex',
           justifyContent: 'center',
           alignItems: 'center',
-          height: '400px',
-          fontSize: '1.125rem',
+          height: '300px',
           color: colors.neutral[500],
         }}>
-          상품을 불러오는 중...
+          도서를 불러오는 중...
         </div>
-      ) : filteredProducts.length === 0 ? (
+      ) : books.length === 0 ? (
         <div style={{
           textAlign: 'center',
           padding: spacing[12],
           color: colors.neutral[500],
         }}>
-          <h3 style={{ marginBottom: spacing[4] }}>상품이 없습니다</h3>
-          <p>다른 검색어나 필터를 시도해보세요.</p>
+          <p>검색 결과가 없습니다. 다른 검색어를 입력해보세요.</p>
         </div>
       ) : (
-        <Grid
-          columns={
-            layout === 'grid' 
-              ? { xs: 1, sm: 2, md: 2, lg: 3, xl: 4 }
-              : { xs: 1, sm: 1, md: 1, lg: 1, xl: 1 }
-          }
-          gap={6}
-        >
-          {filteredProducts.map(product => (
-            <ProductCard
-              key={product.id}
-              product={product}
-              layout={layout}
-              onAddToCart={handleAddToCart}
-              onToggleWishlist={handleToggleWishlist}
-              onViewDetails={handleViewDetails}
-            />
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ borderBottom: `2px solid ${colors.neutral[200]}` }}>
+              {['제목', '저자', '카테고리', '재고', '대출'].map(col => (
+                <th key={col} style={{
+                  padding: `${spacing[3]} ${spacing[4]}`,
+                  textAlign: 'left',
+                  fontSize: '0.875rem',
+                  fontWeight: '600',
+                  color: colors.neutral[600],
+                }}>
+                  {col}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {books.map(book => (
+              <BookListRow
+                key={book.id}
+                book={book}
+                onLoan={handleLoanRequest}
+              />
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {/* 페이지네이션 */}
+      {totalPages > 1 && (
+        <div style={{
+          display: 'flex',
+          justifyContent: 'center',
+          gap: spacing[2],
+          marginTop: spacing[8],
+        }}>
+          {Array.from({ length: totalPages }, (_, i) => (
+            <Button
+              key={i}
+              variant={pageNo === i ? 'primary' : 'outline'}
+              size="small"
+              onClick={() => fetchBooks({
+                keyword: searchKeyword,
+                category: selectedCategory === '전체' ? '' : selectedCategory,
+                page: i,
+              })}
+            >
+              {i + 1}
+            </Button>
           ))}
-        </Grid>
+        </div>
       )}
     </div>
   );
 
   return (
-    <PageLayout
-      variant="sidebar"
-      sidebarContent={sidebarContent}
-      headerProps={{
-        showSearch: true,
-        onSearch: (term) => handleFilterChange('search', term),
-      }}
-    >
-      {mainContent}
-    </PageLayout>
+    <>
+      <PageLayout
+        variant="sidebar"
+        sidebarContent={sidebarContent}
+      >
+        {mainContent}
+      </PageLayout>
+
+      {/* 대출 신청 모달 — selectedBook이 있을 때만 렌더링 */}
+      {isLoanModalOpen && selectedBook && (
+        <LoanModal
+          book={selectedBook}
+          onConfirm={() => {
+            setIsLoanModalOpen(false);
+            setSelectedBook(null);
+          }}
+          onClose={() => {
+            setIsLoanModalOpen(false);
+            setSelectedBook(null);
+          }}
+        />
+      )}
+    </>
   );
 };
 
-export default ProductListPage;
+export default BookListPage;
 ```
+
+> **Figma → 코드 연결 포인트**
+>
+> | Figma 컴포넌트 | React 컴포넌트 | Props |
+> |---|---|---|
+> | BookRow (Organism) | `BookListRow` | `book`, `onLoan` |
+> | StockBadge (Atom) | `StockBadge` (내부) | `stock` |
+> | CategoryBadge (Atom) | `CategoryBadge` (내부) | `name` |
+> | LoanButton (Atom) | `LoanButton` (내부) | `disabled={stock===0}` |
+> | LoanModal (Organism) | `LoanModal` | `book`, `onConfirm`, `onClose` |
+> | CategoryFilter (Molecule) | `<select>` (사이드바) | `value`, `onChange` |
 
 ### 7.8 Figma Dev Mode 연동 최적화
 
 ```jsx
 // utils/figmaTokens.js - Figma Variables를 JavaScript로 동기화
+// Figma 변수 패널의 값을 그대로 붙여넣으세요. (도서관 시스템 디자인 토큰 기준)
 export const figmaTokens = {
   // Figma에서 추출한 실제 토큰 값들
   colors: {
-    'color/primary/500': '#0ea5e9',
-    'color/neutral/0': '#ffffff',
+    'color/primary/500': '#3b82f6',   // 도서관 Primary — 대출 신청 버튼, 링크
+    'color/success/500': '#22c55e',   // 재고 있음 배지
+    'color/warning/500': '#f59e0b',   // 연체 경고
+    'color/danger/500':  '#ef4444',   // 재고 없음, 삭제
+    'color/neutral/500': '#64748b',   // 보조 텍스트
+    'color/neutral/0':   '#ffffff',
     'color/neutral/900': '#0f172a',
     // ... 기타 색상 토큰들
   },
